@@ -153,14 +153,17 @@ try {
   const verifierRunId = randomUUID().replaceAll('-', '');
   const claudeSessionId = `claude-skill-oracle-${verifierRunId}`;
   const codexSessionId = `codex-skill-oracle-${verifierRunId}`;
+  const antigravitySessionId = `antigravity-skill-oracle-${verifierRunId}`;
   const dbPath = path.join(resolvedTempDir, 'agentmonitor.db');
   const claudeDir = path.join(resolvedTempDir, 'claude');
   const projectsDir = path.join(claudeDir, 'projects');
   const catalogDir = path.join(resolvedTempDir, 'catalog');
   const codexHome = path.join(resolvedTempDir, 'codex');
+  const antigravityHome = path.join(resolvedTempDir, 'antigravity-cli');
   fs.mkdirSync(projectsDir, { recursive: true });
   fs.mkdirSync(catalogDir, { recursive: true });
   fs.mkdirSync(path.join(codexHome, 'sessions'), { recursive: true });
+  fs.mkdirSync(path.join(antigravityHome, 'conversations'), { recursive: true });
 
   const portProbe = net.createServer();
   portProbeForCleanup = portProbe;
@@ -180,6 +183,7 @@ try {
     AGENTMONITOR_PORT: String(port),
     AGENTMONITOR_PROJECTS_DIR: projectsDir,
     AGENTMONITOR_CLAUDE_DIR: claudeDir,
+    AGENTMONITOR_ANTIGRAVITY_DIR: antigravityHome,
     AGENTMONITOR_SKILL_CATALOG_DIRS: catalogDir,
     AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
     CODEX_HOME: codexHome,
@@ -194,6 +198,9 @@ try {
   } = await import('../dist/parser/claude-code.js');
   const { parseCodexSessionMessages } = await import('../dist/parser/codex-sessions.js');
   const { syncCodexLiveSession } = await import('../dist/live/codex-adapter.js');
+  const { parseAntigravitySessions } = await import('../dist/parser/antigravity-sessions.js');
+  const { syncAntigravityLiveSession } = await import('../dist/live/antigravity-adapter.js');
+  const { default: SqliteDatabase } = await import('better-sqlite3');
 
   initSchema();
   const db = getDb();
@@ -325,6 +332,118 @@ try {
     'built-codex-oracle',
   );
   syncCodexLiveSession(db, parsedCodex);
+
+  const antigravityDbPath = path.join(
+    antigravityHome,
+    'conversations',
+    `${antigravitySessionId}.db`,
+  );
+  const agrConvDb = new SqliteDatabase(antigravityDbPath);
+  agrConvDb.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+  agrConvDb.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+  agrConvDb.close();
+  const agrSummaryDb = new SqliteDatabase(path.join(antigravityHome, 'conversation_summaries.db'));
+  agrSummaryDb.exec(`
+    CREATE TABLE conversation_summaries (
+      conversation_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      preview TEXT NOT NULL DEFAULT '',
+      workspace_uris TEXT NOT NULL DEFAULT '[]',
+      parent_conversation_id TEXT NOT NULL DEFAULT ''
+    );
+  `);
+  agrSummaryDb.prepare(`
+    INSERT INTO conversation_summaries (conversation_id, title, preview, workspace_uris, parent_conversation_id)
+    VALUES (?, 'Antigravity skill oracle', '', '["file:///work/antigravity"]', '')
+  `).run(antigravitySessionId);
+  agrSummaryDb.close();
+
+  const agrSkillPath = '/Users/example/.gemini/config/skills/test-strategy/SKILL.md';
+  const agrTranscriptPath = path.join(
+    antigravityHome,
+    'brain',
+    antigravitySessionId,
+    '.system_generated',
+    'logs',
+    'transcript_full.jsonl',
+  );
+  fs.mkdirSync(path.dirname(agrTranscriptPath), { recursive: true });
+  const agrTranscriptEntries = [
+    {
+      step_index: 0,
+      type: 'USER_INPUT',
+      status: 'DONE',
+      created_at: '2026-07-10T12:00:00Z',
+      content: '<USER_REQUEST>\nMention /Users/example/.gemini/config/skills/prose-ignored/SKILL.md only in prose.\n</USER_REQUEST>',
+    },
+    {
+      step_index: 1,
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: '2026-07-10T12:00:01Z',
+      tool_calls: [{ id: 'agr-read-1', name: 'read_file', args: { Path: agrSkillPath } }],
+    },
+    {
+      step_index: 2,
+      type: 'GENERIC',
+      status: 'DONE',
+      call_id: 'agr-read-1',
+      created_at: '2026-07-10T12:00:02Z',
+      content: '1: ---\n2: name: test-strategy\n---',
+    },
+    {
+      step_index: 3,
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: '2026-07-10T12:00:03Z',
+      tool_calls: [{ id: 'agr-read-2', name: 'read_file', args: { Path: agrSkillPath } }],
+    },
+    {
+      step_index: 4,
+      type: 'GENERIC',
+      status: 'DONE',
+      call_id: 'agr-read-2',
+      created_at: '2026-07-10T12:00:04Z',
+      content: '1: ---\n2: name: test-strategy\n---',
+    },
+    {
+      step_index: 5,
+      type: 'CHECKPOINT',
+      status: 'DONE',
+      created_at: '2026-07-10T12:00:05Z',
+      content: '# Resuming from a compaction',
+    },
+    {
+      step_index: 6,
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: '2026-07-10T12:00:06Z',
+      tool_calls: [{ id: 'agr-read-3', name: 'read_file', args: { Path: agrSkillPath } }],
+    },
+    {
+      step_index: 7,
+      type: 'GENERIC',
+      status: 'DONE',
+      call_id: 'agr-read-3',
+      created_at: '2026-07-10T12:00:07Z',
+      content: '1: ---\n2: name: test-strategy\n---',
+    },
+  ];
+  fs.writeFileSync(
+    agrTranscriptPath,
+    agrTranscriptEntries.map(entry => JSON.stringify(entry)).join('\n') + '\n',
+    'utf-8',
+  );
+  const parsedAntigravity = parseAntigravitySessions(antigravityDbPath);
+  insertParsedSession(
+    db,
+    parsedAntigravity,
+    antigravityDbPath,
+    fs.statSync(antigravityDbPath).size,
+    'built-antigravity-oracle',
+  );
+  syncAntigravityLiveSession(db, parsedAntigravity);
+
   assert.deepEqual(
     db.prepare(`
       SELECT agent, COUNT(*) AS observations
@@ -335,6 +454,7 @@ try {
       ORDER BY agent
     `).all(),
     [
+      { agent: 'antigravity', observations: 4 },
       { agent: 'claude', observations: 39 },
       { agent: 'codex', observations: 4 },
     ],
@@ -397,16 +517,26 @@ try {
   }
   assert.deepEqual(
     health.consultations.byHarness.map(item => item.harness),
-    ['claude', 'codex'],
+    ['antigravity', 'claude', 'codex'],
   );
+  const antigravity = health.consultations.byHarness
+    .find(item => item.harness === 'antigravity')
+    ?.skills.find(skill => skill.name === 'test-strategy');
   const claude = health.consultations.byHarness
     .find(item => item.harness === 'claude')
     ?.skills.find(skill => skill.name === 'test-strategy');
   const codex = health.consultations.byHarness
     .find(item => item.harness === 'codex')
     ?.skills.find(skill => skill.name === 'test-strategy');
+  assert.ok(antigravity);
   assert.ok(claude);
   assert.ok(codex);
+  assert.deepEqual(antigravity.classes, {
+    first_read: 1,
+    rehydration_after_compaction: 1,
+    repeat_no_compaction: 1,
+    unclassifiable: 0,
+  });
   assert.deepEqual(claude.classes, {
     first_read: 1,
     rehydration_after_compaction: 1,
@@ -419,6 +549,13 @@ try {
     repeat_no_compaction: 0,
     unclassifiable: 0,
   });
+  const agrContextResponse = await fetch(
+    `${baseUrl}/api/v2/sessions/${encodeURIComponent(antigravitySessionId)}/skill-context`,
+  );
+  assert.equal(agrContextResponse.status, 200);
+  const agrContext = await agrContextResponse.json();
+  assert.equal(agrContext.harness, 'antigravity');
+  assert.deepEqual(agrContext.consultationClassification, { observable: true });
   const dojoRuntimeSmoke = await runDojoRuntimeSmoke(baseUrl);
 
   const realization = {
@@ -503,13 +640,15 @@ try {
   console.log(
     JSON.stringify({
       builtRuntime: true,
-      healthHarnesses: ['claude', 'codex'],
+      healthHarnesses: ['antigravity', 'claude', 'codex'],
+      antigravityClasses: antigravity.classes,
       claudeClasses: claude.classes,
       codexClasses: codex.classes,
       realizationCreate: createResponse.status,
       realizationReplay: replayResponse.status,
       association: associateResponse.status,
       context: contextResponse.status,
+      antigravityContext: agrContextResponse.status,
       dojoRuntimeSmoke,
     }),
   );

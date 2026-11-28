@@ -8,6 +8,8 @@ import {
   CHAT_START_METADATA_FIELDS,
   CORTEX_USAGE_FIELDS,
   PLANNER_RESPONSE_FIELDS,
+  STEP_METADATA_FIELDS,
+  CHAT_TOOL_CALL_FIELDS,
 } from './fieldmap.js';
 
 export type WireType = 0 | 1 | 2 | 5;
@@ -115,6 +117,12 @@ export interface PlannerResponseIds {
   providerAssignedMessageId?: string;
 }
 
+export interface AntigravityChatToolCall {
+  id?: string;
+  name?: string;
+  argumentsJson?: string;
+}
+
 export interface StepEnvelope {
   type?: number;
   status?: number;
@@ -122,6 +130,26 @@ export interface StepEnvelope {
   hasMetadata: boolean;
   hasError: boolean;
   plannerIds?: PlannerResponseIds;
+  plannerToolCalls?: AntigravityChatToolCall[];
+  metadataToolCall?: AntigravityChatToolCall;
+}
+
+function decodeChatToolCall(bytes: Buffer): AntigravityChatToolCall | undefined {
+  const fields = decodeMessage(bytes);
+  const id = getString(fields, CHAT_TOOL_CALL_FIELDS.id);
+  const name = getString(fields, CHAT_TOOL_CALL_FIELDS.name);
+  const argumentsJson = getString(fields, CHAT_TOOL_CALL_FIELDS.argumentsJson);
+  if (id === undefined && name === undefined && argumentsJson === undefined) return undefined;
+  return {
+    ...(id !== undefined ? { id } : {}),
+    ...(name !== undefined ? { name } : {}),
+    ...(argumentsJson !== undefined ? { argumentsJson } : {}),
+  };
+}
+
+export function decodeStepToolCall(metadata: Buffer): AntigravityChatToolCall | undefined {
+  const raw = getBytes(decodeMessage(metadata), STEP_METADATA_FIELDS.toolCall);
+  return raw ? decodeChatToolCall(raw) : undefined;
 }
 
 export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
@@ -137,6 +165,7 @@ export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
     }
   }
   let plannerIds: PlannerResponseIds | undefined;
+  let plannerToolCalls: AntigravityChatToolCall[] | undefined;
   if (kind === 'planner_response' && kindField !== undefined) {
     const plannerBytes = getBytes(f, kindField);
     if (plannerBytes) {
@@ -146,8 +175,18 @@ export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
       if (messageId !== undefined || providerAssignedMessageId !== undefined) {
         plannerIds = { messageId, providerAssignedMessageId };
       }
+      const rawCalls = pf.get(PLANNER_RESPONSE_FIELDS.toolCalls) ?? [];
+      const decodedCalls: AntigravityChatToolCall[] = [];
+      for (const entry of rawCalls) {
+        if (!entry.bytes) continue;
+        const decoded = decodeChatToolCall(entry.bytes);
+        if (decoded) decodedCalls.push(decoded);
+      }
+      if (decodedCalls.length > 0) plannerToolCalls = decodedCalls;
     }
   }
+  const envelopeMeta = getBytes(f, STEP_FIELDS.metadata);
+  const metadataToolCall = envelopeMeta ? decodeStepToolCall(envelopeMeta) : undefined;
   return {
     type: getVarint(f, STEP_FIELDS.type),
     status: getVarint(f, STEP_FIELDS.status),
@@ -155,6 +194,8 @@ export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
     hasMetadata: f.has(STEP_FIELDS.metadata),
     hasError: f.has(STEP_FIELDS.error),
     ...(plannerIds ? { plannerIds } : {}),
+    ...(plannerToolCalls ? { plannerToolCalls } : {}),
+    ...(metadataToolCall ? { metadataToolCall } : {}),
   };
 }
 
@@ -169,7 +210,7 @@ function decodeProtoTimestampMs(stamp: Buffer): number | undefined {
 }
 
 export function decodeStepTimestampMs(metadata: Buffer): number | undefined {
-  const inner = getBytes(decodeMessage(metadata), 1);
+  const inner = getBytes(decodeMessage(metadata), STEP_METADATA_FIELDS.createdAt);
   if (!inner) return undefined;
   return decodeProtoTimestampMs(inner);
 }

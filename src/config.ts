@@ -227,9 +227,13 @@ function parseSkillCatalogDirs(env: EnvMap): string[] {
   }
 
   const codexHome = env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
+  const geminiHome = path.join(os.homedir(), '.gemini');
   return [
     path.join(os.homedir(), '.claude', 'skills'),
     path.join(codexHome, 'skills'),
+    path.join(geminiHome, 'config', 'skills'),
+    path.join(geminiHome, 'antigravity-cli', 'builtin', 'skills'),
+    path.join(os.homedir(), '.agents', 'skills'),
   ];
 }
 

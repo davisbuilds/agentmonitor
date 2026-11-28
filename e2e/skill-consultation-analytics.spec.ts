@@ -37,16 +37,24 @@ test('Skills shows invocation volume and a filterable consultation explorer', as
   const comparability = region.getByTestId('skill-comparability');
   await expect(comparability).toContainText('Rates are not pooled across harnesses.');
 
+  const antigravity = region.locator('section[aria-labelledby="skill-harness-antigravity"]');
   const claude = region.locator('section[aria-labelledby="skill-harness-claude"]');
   const codex = region.locator('section[aria-labelledby="skill-harness-codex"]');
+  await expect(antigravity.getByRole('heading', { name: 'Antigravity' })).toBeVisible();
   await expect(claude.getByRole('heading', { name: 'Claude Code' })).toBeVisible();
   await expect(codex.getByRole('heading', { name: 'Codex' })).toBeVisible();
   for (const harnessName of await region.locator('section h4').allTextContents()) {
     await expect(comparability).toContainText(harnessName.trim());
   }
 
+  const antigravitySkill = antigravity.locator('details').filter({ hasText: 'test-strategy' });
   const claudeSkill = claude.locator('details').filter({ hasText: 'test-strategy' });
   const codexSkill = codex.locator('details').filter({ hasText: 'test-strategy' });
+  await expect(antigravitySkill).toContainText('1 / 1');
+  await expect(antigravitySkill).toContainText('100% first read');
+  await expect(antigravitySkill).toContainText(/1\s+rehydrations/);
+  await expect(antigravitySkill).toContainText(/1 · 0\s+repeat · unknown/);
+  await expect(antigravitySkill).toContainText('presentation unavailable');
   await expect(claudeSkill).toContainText('1 / 1');
   await expect(claudeSkill).toContainText('100% first read');
   await expect(claudeSkill).toContainText(/1\s+rehydrations/);
@@ -72,11 +80,12 @@ test('Skills shows invocation volume and a filterable consultation explorer', as
   await expect(region.getByText('No skills match the explorer filters.')).toBeVisible();
   await region.getByRole('button', { name: 'Reset explorer filters' }).click();
   await expect(page).not.toHaveURL(/skill=/);
+  await expect(antigravity).toBeVisible();
   await expect(claude).toBeVisible();
   await expect(codex).toBeVisible();
   await expect(region.locator('details')).toHaveCount(30);
-  await region.getByRole('button', { name: 'Show 7 more' }).click();
-  await expect(region.locator('details')).toHaveCount(37);
+  await region.getByRole('button', { name: 'Show 8 more' }).click();
+  await expect(region.locator('details')).toHaveCount(38);
 
   await region.screenshot({
     path: path.join(artifactDir, 'skill-consultations-explorer-desktop.png'),
@@ -86,9 +95,16 @@ test('Skills shows invocation volume and a filterable consultation explorer', as
   await expect(region.locator('details')).toHaveCount(30);
   await expect(region.getByRole('button', { name: 'Show 6 more' })).toBeVisible();
 
+  await page.getByLabel('Filter by agent').selectOption('antigravity');
+  await expect(antigravity).toBeVisible();
+  await expect(claude).toHaveCount(0);
+  await expect(codex).toHaveCount(0);
+  await expect(region.getByTestId('skill-comparability')).toHaveCount(0);
+
   await page.getByLabel('Filter by agent').selectOption('codex');
   await expect(codex).toBeVisible();
   await expect(claude).toHaveCount(0);
+  await expect(antigravity).toHaveCount(0);
   await expect(region.getByTestId('skill-comparability')).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });

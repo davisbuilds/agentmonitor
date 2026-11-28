@@ -277,13 +277,18 @@ sent, within the selected dates, so a resumed session counts in every hour it
 was active; a session with no message times counts at its start. Capability metadata distinguishes all-session
 aggregates from tool or transcript analysis that excludes unsupported sources.
 
-Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of
-`SKILL.md`. Shell variables and glob paths do not count as named skills. A Codex
+Skill analytics combine explicit Claude `Skill` calls, concrete Codex reads of
+`SKILL.md`, and verified Antigravity file-read/command reads of `SKILL.md` under
+recognized skill roots (`~/.gemini/config/skills`,
+`~/.gemini/antigravity-cli/builtin/skills`, `~/.agents/skills`, `~/.claude/skills`,
+`~/.codex/skills`, configured catalog directories, and repo-local skill roots).
+Shell variables, glob paths, prose mentions, edits, and failed or ambiguous
+unlinked reads do not count as consultations. A Codex
 read reported by both OTEL and its JSONL rollout counts once: OTEL is
 authoritative per session and skill, and the rollout adds only the reads OTEL
 did not report. Skill
 health distinguishes first reads, post-compaction rehydration, repeats without
-compaction, and unclassifiable observations by harness. Claude and Codex evidence
+compaction, and unclassifiable observations by harness. Cross-harness evidence
 is not pooled as directly comparable because the observation mechanisms differ.
 
 Invocation, presentation, project breadth, and version attribution are screening

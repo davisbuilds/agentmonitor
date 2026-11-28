@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { readAntigravityConversationSnapshot } from '../import/antigravity/snapshot.js';
+import type { AntigravityChatToolCall } from '../import/antigravity/proto.js';
 import { findSubagentBoundary } from '../parser/codex-subagent-boundary.js';
 import {
   codexPhysicalRolloutId, createCodexRolloutInventory, currentCodexRollout, discoverCodexRolloutSiblings,
@@ -33,14 +35,15 @@ export interface ToolTimingReadout {
 }
 
 export interface ToolTimingInput {
-  source: 'codex' | 'claude-code';
+  source: 'codex' | 'claude-code' | 'antigravity';
   sessionId: string;
   filePaths: readonly string[];
   codexInventory?: CodexRolloutInventory;
+  antigravityDbPath?: string;
 }
 
 type NativeRecord = Record<string, unknown>;
-type ToolCall = { name: string; timestamp: number | null; kind: 'function' | 'custom' | 'claude'; assistantId?: string };
+type ToolCall = { name: string; timestamp: number | null; kind: 'function' | 'custom' | 'claude' | 'antigravity'; assistantId?: string };
 type ReportedTimer =
   | { source: 'codex_code_mode_wall_time'; milliseconds: number }
   | { source: 'codex_shell_wall_time'; milliseconds: number; shell: 'unified' | 'shell_command' }
@@ -323,6 +326,145 @@ function* readClaudeEvents(
   }
 }
 
+const ANTIGRAVITY_RESULT_HINTS: Record<string, readonly string[]> = {
+  LIST_DIRECTORY: ['list_dir', 'list_directory'],
+  EDIT_FILE: ['edit_file', 'replace_file_content', 'multi_replace_file_content'],
+  WRITE_FILE: ['write_file', 'write_to_file'],
+};
+
+function antigravityStepMatchesTool(entryType: string, toolName: string): boolean {
+  const lowerType = entryType.toLowerCase();
+  const lowerTool = toolName.toLowerCase();
+  if (lowerType === lowerTool) return true;
+  const hints = ANTIGRAVITY_RESULT_HINTS[entryType];
+  return hints ? hints.includes(lowerTool) : false;
+}
+
+function* antigravityToolEvents(
+  records: Iterable<NativeRecord>,
+  stepCorrelation: ReadonlyMap<number, { plannerToolCalls?: AntigravityChatToolCall[]; stepToolCall?: AntigravityChatToolCall }>,
+  coverage: ToolTimingCoverage,
+): Generator<TimingEvent> {
+  const entriesByStep = new Map<number, { record: NativeRecord; order: number }>();
+  const unindexed: Array<{ record: NativeRecord; order: number }> = [];
+  let order = 0;
+  for (const record of records) {
+    const stepIndex = typeof record.step_index === 'number' && Number.isFinite(record.step_index)
+      ? record.step_index
+      : undefined;
+    const item = { record, order: order++ };
+    if (stepIndex !== undefined) entriesByStep.set(stepIndex, item);
+    else unindexed.push(item);
+  }
+  const ordered = [...entriesByStep.values(), ...unindexed].sort((a, b) => {
+    const idxA = typeof a.record.step_index === 'number' ? a.record.step_index : undefined;
+    const idxB = typeof b.record.step_index === 'number' ? b.record.step_index : undefined;
+    if ((idxA !== undefined) !== (idxB !== undefined)) return idxA !== undefined ? -1 : 1;
+    if (idxA !== undefined && idxB !== undefined && idxA !== idxB) return idxA - idxB;
+    return a.order - b.order;
+  });
+
+  const pending: Array<{ id: string; name: string }> = [];
+  const skipped = new Set(['CONVERSATION_HISTORY', 'EPHEMERAL_MESSAGE', 'CHECKPOINT']);
+
+  for (const { record, order: lineOrder } of ordered) {
+    const entryType = typeof record.type === 'string' ? record.type : '';
+    if (skipped.has(entryType)) continue;
+    const timestamp = parseTimestamp(record.created_at);
+    const stepIndex = typeof record.step_index === 'number' && Number.isFinite(record.step_index)
+      ? record.step_index
+      : undefined;
+
+    if (entryType === 'USER_INPUT' || entryType === 'ERROR_MESSAGE') {
+      pending.length = 0;
+      continue;
+    }
+    if (entryType === 'SYSTEM_MESSAGE') continue;
+
+    if (entryType === 'PLANNER_RESPONSE') {
+      pending.length = 0;
+      const sqliteCalls = stepIndex !== undefined ? stepCorrelation.get(stepIndex)?.plannerToolCalls : undefined;
+      const rawCalls = Array.isArray(record.tool_calls) ? record.tool_calls : [];
+      const prefix = stepIndex !== undefined ? `antigravity:${stepIndex}` : `antigravity:line:${lineOrder}`;
+      rawCalls.forEach((rawCall, callIdx) => {
+        const call = asRecord(rawCall);
+        const name = token(call?.name);
+        if (!name) return;
+        const sqliteCall = sqliteCalls?.[callIdx];
+        const sqliteId = sqliteCall && sqliteCall.name === name ? token(sqliteCall.id) : undefined;
+        const id = token(call?.id) ?? token(call?.tool_call_id) ?? token(call?.call_id) ?? sqliteId ?? `${prefix}:${callIdx}`;
+        pending.push({ id, name });
+      });
+      for (const call of pending) {
+        yield { id: call.id, call: { name: call.name, timestamp, kind: 'antigravity' } };
+      }
+      continue;
+    }
+
+    const hasResult = typeof record.content === 'string'
+      || (typeof record.error === 'string' && record.error.trim().length > 0)
+      || (Array.isArray(record.truncated_fields) && record.truncated_fields.length > 0);
+    if (!hasResult) continue;
+
+    const sqliteStepCall = stepIndex !== undefined ? stepCorrelation.get(stepIndex)?.stepToolCall : undefined;
+    const explicitId = token(record.tool_call_id) ?? token(record.call_id) ?? token(sqliteStepCall?.id);
+    let matchedId: string | undefined;
+    if (explicitId) {
+      const idx = pending.findIndex(call => call.id === explicitId);
+      if (idx !== -1) matchedId = pending.splice(idx, 1)[0]!.id;
+      else matchedId = explicitId;
+    } else if (entryType && entryType !== 'GENERIC') {
+      const matches = pending.map((call, idx) => (antigravityStepMatchesTool(entryType, call.name) ? idx : -1)).filter(idx => idx !== -1);
+      if (matches.length === 1) matchedId = pending.splice(matches[0]!, 1)[0]!.id;
+    } else if (pending.length === 1) {
+      matchedId = pending.shift()!.id;
+    }
+
+    if (!matchedId) {
+      coverage.unmatchedReturns++;
+      continue;
+    }
+    yield { id: matchedId, timestamp, kind: 'antigravity', timer: null };
+  }
+}
+
+function* readAntigravityEvents(
+  input: ToolTimingInput,
+  paths: string[],
+  readFile: (filePath: string) => Buffer,
+  coverage: ToolTimingCoverage,
+): Generator<TimingEvent> {
+  const stepCorrelation = new Map<number, { plannerToolCalls?: AntigravityChatToolCall[]; stepToolCall?: AntigravityChatToolCall }>();
+  if (input.antigravityDbPath) {
+    try {
+      const snapshot = readAntigravityConversationSnapshot(input.antigravityDbPath, {
+        includeSummary: false,
+        includeTranscript: false,
+        throwOnError: false,
+      });
+      for (const step of snapshot.steps) {
+        if (step.envelope.plannerToolCalls?.length || step.toolCall) {
+          stepCorrelation.set(step.idx, {
+            ...(step.envelope.plannerToolCalls?.length ? { plannerToolCalls: step.envelope.plannerToolCalls } : {}),
+            ...(step.toolCall ? { stepToolCall: step.toolCall } : {}),
+          });
+        }
+      }
+    } catch {
+      // WHY: Missing or unreadable SQLite correlation degrades to explicit JSONL pairing.
+    }
+  }
+
+  for (const file of paths) {
+    try {
+      yield* antigravityToolEvents(readJsonl(readFile(file), coverage), stepCorrelation, coverage);
+      coverage.filesRead++;
+    } catch {
+      coverage.unresolvedFiles++;
+    }
+  }
+}
+
 export function readToolTiming(input: ToolTimingInput): ToolTimingReadout {
   const coverage: ToolTimingCoverage = {
     status: 'unavailable', filesRead: 0, malformedRecords: 0, openCalls: 0, unmatchedReturns: 0,
@@ -342,7 +484,9 @@ export function readToolTiming(input: ToolTimingInput): ToolTimingReadout {
   };
   const events = input.source === 'codex'
     ? readCodexEvents(input, paths, readFile, coverage)
-    : readClaudeEvents(input.sessionId, paths, readFile, coverage);
+    : input.source === 'antigravity'
+      ? readAntigravityEvents(input, paths, readFile, coverage)
+      : readClaudeEvents(input.sessionId, paths, readFile, coverage);
   const intervals = pairCalls(events, coverage);
   if (coverage.filesRead) {
     coverage.status = coverage.malformedRecords || coverage.openCalls || coverage.unmatchedReturns

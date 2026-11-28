@@ -1,4 +1,71 @@
 import { createHash } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const PLACEHOLDER_CHARACTERS = ['$', '*', '?', '[', ']', '{', '}'];
+
+const RECOGNIZED_SKILL_ROOT_SUFFIXES = [
+  '/.gemini/config/skills',
+  '/.gemini/antigravity-cli/builtin/skills',
+  '/.gemini/skills',
+  '/.agents/skills',
+  '/.claude/skills',
+  '/.codex/skills',
+] as const;
+
+const RELATIVE_SKILL_ROOT_PREFIXES = new Set([
+  '.gemini/config/skills',
+  '.gemini/antigravity-cli/builtin/skills',
+  '.gemini/skills',
+  '.agents/skills',
+  '.claude/skills',
+  '.codex/skills',
+]);
+
+const FILE_READ_PATH_KEYS = [
+  'Path',
+  'path',
+  'AbsolutePath',
+  'absolute_path',
+  'file_path',
+  'filePath',
+  'TargetFile',
+  'target_file',
+  'uri',
+] as const;
+
+const ANTIGRAVITY_FILE_READ_TOOLS = new Set([
+  'read_file',
+  'view_file',
+  'view_content_chunk',
+  'read_resource',
+]);
+
+const ANTIGRAVITY_SHELL_TOOLS = new Set([
+  'run_command',
+  'shell_exec',
+]);
+
+export const ANTIGRAVITY_SKILL_TOOL_NAMES = [
+  'read_file',
+  'view_file',
+  'view_content_chunk',
+  'read_resource',
+  'run_command',
+  'shell_exec',
+] as const;
+
+const SHELL_READ_COMMANDS = new Set([
+  'cat',
+  'head',
+  'tail',
+  'sed',
+  'less',
+  'more',
+  'nl',
+  'bat',
+]);
 
 function parseJson(value: string | null | undefined): unknown {
   if (!value) return undefined;
@@ -12,6 +79,82 @@ function parseJson(value: string | null | undefined): unknown {
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
+}
+
+function isConcreteSkillName(skillName: string | undefined): skillName is string {
+  if (!skillName) return false;
+  return skillName !== '.'
+    && skillName !== '..'
+    && !PLACEHOLDER_CHARACTERS.some(character => skillName.includes(character));
+}
+
+function toNormalizedPosixPath(rawPath: string, cwd?: string | null): string | null {
+  let candidate = rawPath.trim();
+  if (!candidate) return null;
+  if (
+    (candidate.startsWith('"') && candidate.endsWith('"'))
+    || (candidate.startsWith("'") && candidate.endsWith("'"))
+  ) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+  if (!candidate) return null;
+  if (candidate.startsWith('file://')) {
+    try {
+      candidate = fileURLToPath(candidate);
+    } catch {
+      candidate = candidate.slice('file://'.length);
+    }
+  }
+  if (candidate === '~') {
+    candidate = os.homedir();
+  } else if (candidate.startsWith('~/')) {
+    candidate = path.join(os.homedir(), candidate.slice(2));
+  }
+  const posixCandidate = candidate.replaceAll('\\', '/');
+  if (posixCandidate.startsWith('/')) {
+    return path.posix.normalize(posixCandidate);
+  }
+  if (cwd?.trim()) {
+    const posixCwd = cwd.trim().replaceAll('\\', '/');
+    return path.posix.normalize(path.posix.join(posixCwd, posixCandidate));
+  }
+  return path.posix.normalize(posixCandidate);
+}
+
+function normalizeExtraRoot(root: string): string | null {
+  const normalized = toNormalizedPosixPath(root);
+  if (!normalized) return null;
+  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+}
+
+function isRecognizedSkillRoot(
+  rootDir: string,
+  extraRoots?: readonly string[],
+): boolean {
+  const trimmed = rootDir.length > 1 && rootDir.endsWith('/') ? rootDir.slice(0, -1) : rootDir;
+  if (RELATIVE_SKILL_ROOT_PREFIXES.has(trimmed)) return true;
+  if (RECOGNIZED_SKILL_ROOT_SUFFIXES.some(suffix => trimmed.endsWith(suffix))) return true;
+  if (extraRoots) {
+    for (const root of extraRoots) {
+      const normalized = normalizeExtraRoot(root);
+      if (normalized && trimmed === normalized) return true;
+    }
+  }
+  return false;
+}
+
+function extractSkillNameFromPath(
+  filePath: string,
+  options?: { cwd?: string | null; extraRoots?: readonly string[] },
+): string | undefined {
+  const normalized = toNormalizedPosixPath(filePath, options?.cwd);
+  if (!normalized || !normalized.endsWith('/SKILL.md')) return undefined;
+  const skillDir = path.posix.dirname(normalized);
+  const skillName = path.posix.basename(skillDir).trim();
+  if (!isConcreteSkillName(skillName)) return undefined;
+  const rootDir = path.posix.dirname(skillDir);
+  if (!isRecognizedSkillRoot(rootDir, options?.extraRoots)) return undefined;
+  return skillName;
 }
 
 export function extractCanonicalCodexSessionId(sessionId: string): string {
@@ -34,7 +177,9 @@ export function extractCodexCommandFromInputJson(inputJson: string | null): stri
   const cmd = record['cmd'];
   if (typeof cmd === 'string') return cmd;
   const command = record['command'];
-  return typeof command === 'string' ? command : undefined;
+  if (typeof command === 'string') return command;
+  const commandLine = record['CommandLine'];
+  return typeof commandLine === 'string' ? commandLine : undefined;
 }
 
 export function extractCodexCommandFromEventMetadata(metadataJson: string | null): string | undefined {
@@ -56,21 +201,100 @@ export function extractCodexCommandFromEventMetadata(metadataJson: string | null
   return typeof input === 'string' ? input : undefined;
 }
 
+function extractSkillPathMatches(command: string): Array<{ fullPath: string; skillName: string }> {
+  const matches: Array<{ fullPath: string; skillName: string }> = [];
+  const pattern = /(?:^|[\s'"])((?:~\/|\/|\.[a-zA-Z0-9_.-]+\/)[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
+  for (const match of command.matchAll(pattern)) {
+    const fullPath = match[1];
+    const skillName = match[2]?.trim();
+    if (fullPath && isConcreteSkillName(skillName)) {
+      matches.push({ fullPath, skillName });
+    }
+  }
+  return matches;
+}
+
 export function extractCodexSkillNamesFromCommand(command: string): string[] {
   const skillNames = new Set<string>();
   const pattern = /(?:^|[\s'"])(~?\/[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
-  const placeholderCharacters = ['$', '*', '?', '[', ']', '{', '}'];
 
   for (const match of command.matchAll(pattern)) {
     const skillName = match[2]?.trim();
-    const isConcreteSkill = skillName
-      && skillName !== '.'
-      && skillName !== '..'
-      && !placeholderCharacters.some(character => skillName.includes(character));
-    if (isConcreteSkill) skillNames.add(skillName);
+    if (isConcreteSkillName(skillName)) skillNames.add(skillName);
   }
 
   return [...skillNames];
+}
+
+function commandHasFileReadSegment(command: string): boolean {
+  const segments = command.split(/(?:&&|\|\||;|\||\n)/);
+  for (const segment of segments) {
+    if (!segment.includes('SKILL.md')) continue;
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    let idx = 0;
+    while (idx < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[idx]!)) idx++;
+    const cmd = tokens[idx];
+    if (!cmd) continue;
+    const base = path.posix.basename(cmd.replaceAll('\\', '/'));
+    if (SHELL_READ_COMMANDS.has(base)) return true;
+  }
+  return false;
+}
+
+function extractAntigravityFileReadPath(inputJson: string | null): string | undefined {
+  const record = asRecord(parseJson(inputJson));
+  if (!record) return undefined;
+  for (const key of FILE_READ_PATH_KEYS) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+export function extractAntigravitySkillNamesFromToolCall(
+  toolName: string,
+  inputJson: string | null,
+  options?: { cwd?: string | null; extraRoots?: readonly string[] },
+): string[] {
+  if (!inputJson || !inputJson.includes('SKILL.md')) return [];
+
+  if (ANTIGRAVITY_FILE_READ_TOOLS.has(toolName)) {
+    const rawPath = extractAntigravityFileReadPath(inputJson);
+    if (!rawPath) return [];
+    const skillName = extractSkillNameFromPath(rawPath, options);
+    return skillName ? [skillName] : [];
+  }
+
+  if (ANTIGRAVITY_SHELL_TOOLS.has(toolName)) {
+    const command = extractCodexCommandFromInputJson(inputJson);
+    if (!command || !commandHasFileReadSegment(command)) return [];
+    const skillNames = new Set<string>();
+    for (const { fullPath } of extractSkillPathMatches(command)) {
+      const skillName = extractSkillNameFromPath(fullPath, options);
+      if (skillName) skillNames.add(skillName);
+    }
+    return [...skillNames];
+  }
+
+  return [];
+}
+
+export function fingerprintAntigravitySkillCall(
+  toolName: string,
+  inputJson: string | null,
+  options?: { cwd?: string | null },
+): string | null {
+  if (ANTIGRAVITY_FILE_READ_TOOLS.has(toolName)) {
+    const rawPath = extractAntigravityFileReadPath(inputJson);
+    if (!rawPath) return null;
+    const normalized = toNormalizedPosixPath(rawPath, options?.cwd) ?? rawPath;
+    return createHash('sha256').update(`${toolName}\0${normalized}`, 'utf8').digest('hex');
+  }
+  if (ANTIGRAVITY_SHELL_TOOLS.has(toolName)) {
+    const command = extractCodexCommandFromInputJson(inputJson);
+    return command ? fingerprintCodexCommand(command) : null;
+  }
+  return null;
 }
 
 export function fingerprintCodexCommand(command: string): string {

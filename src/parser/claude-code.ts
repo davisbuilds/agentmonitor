@@ -224,39 +224,67 @@ function extractSubagentSessionId(input: unknown): string | null {
   return null;
 }
 
+function extractSubagentRoleTitle(inputJson: string | null): string | null {
+  if (!inputJson) return null;
+  try {
+    const parsed = JSON.parse(inputJson) as unknown;
+    const record = asRecord(parsed);
+    if (!record) return null;
+    const raw = record['Role'] ?? record['role'];
+    if (typeof raw !== 'string') return null;
+    const cleaned = raw.replace(/\s+/g, ' ').trim().slice(0, 200);
+    return cleaned || null;
+  } catch {
+    return null;
+  }
+}
+
 function linkParsedSessionRelationships(
   db: Database.Database,
   sessionId: string,
   subagentSessionIds: string[],
 ): void {
   if (subagentSessionIds.length > 0) {
+    const selectRoleInput = db.prepare(`
+      SELECT input_json
+      FROM tool_calls
+      WHERE session_id = ? AND subagent_session_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `);
     const updateChild = db.prepare(`
       UPDATE browsing_sessions
       SET parent_session_id = ?,
-          relationship_type = 'subagent'
+          relationship_type = 'subagent',
+          title = COALESCE(NULLIF(title, ''), ?)
       WHERE id = ?
     `);
 
     for (const childId of subagentSessionIds) {
-      updateChild.run(sessionId, childId);
+      if (childId === sessionId) continue;
+      const callRow = selectRoleInput.get(sessionId, childId) as { input_json: string | null } | undefined;
+      const roleTitle = extractSubagentRoleTitle(callRow?.input_json ?? null);
+      updateChild.run(sessionId, roleTitle, childId);
     }
   }
 
   const parent = db.prepare(`
-    SELECT session_id
+    SELECT session_id, input_json
     FROM tool_calls
-    WHERE subagent_session_id = ?
+    WHERE subagent_session_id = ? AND session_id != ?
     ORDER BY id DESC
     LIMIT 1
-  `).get(sessionId) as { session_id: string } | undefined;
+  `).get(sessionId, sessionId) as { session_id: string; input_json: string | null } | undefined;
 
   if (parent) {
+    const roleTitle = extractSubagentRoleTitle(parent.input_json);
     db.prepare(`
       UPDATE browsing_sessions
       SET parent_session_id = ?,
-          relationship_type = 'subagent'
+          relationship_type = 'subagent',
+          title = COALESCE(NULLIF(title, ''), ?)
       WHERE id = ?
-    `).run(parent.session_id, sessionId);
+    `).run(parent.session_id, roleTitle, sessionId);
   }
 }
 

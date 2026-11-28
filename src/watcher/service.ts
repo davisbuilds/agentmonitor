@@ -100,7 +100,7 @@ function getCodexHome(): string {
 }
 
 function getAntigravityDir(): string {
-  return path.join(os.homedir(), '.gemini', 'antigravity-cli');
+  return process.env.AGENTMONITOR_ANTIGRAVITY_DIR?.trim() || path.join(os.homedir(), '.gemini', 'antigravity-cli');
 }
 
 function shouldIgnoreWatchedPath(

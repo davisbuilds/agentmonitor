@@ -40,7 +40,19 @@ export const CORTEX_USAGE_FIELDS = {
 
 export const PLANNER_RESPONSE_FIELDS = {
   messageId: 6,
+  toolCalls: 7,
   providerAssignedMessageId: 15,
+} as const;
+
+export const STEP_METADATA_FIELDS = {
+  createdAt: 1,
+  toolCall: 4,
+} as const;
+
+export const CHAT_TOOL_CALL_FIELDS = {
+  id: 1,
+  name: 2,
+  argumentsJson: 3,
 } as const;
 
 export const STEP_FIELDS = {

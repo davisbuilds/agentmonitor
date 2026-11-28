@@ -412,15 +412,24 @@ Live adapters under `src/live/` normalize current sessions and declare fidelity:
   `antigravity-transcript` from
   `brain/<uuid>/.system_generated/logs/transcript_full.jsonl` (preferred, `full`
   fidelity when complete with no `truncated_fields`) or `transcript.jsonl`
-  (marking `truncated_fields` visibly at `summary` fidelity), preserving any
-  trailing unflushed SQLite `steps` and falling back to `summary`-fidelity
-  (`antigravity-sqlite`) from SQLite `steps` when absent. The same sync also
-  ingests Antigravity `events` and reconciles `sessions` (`active` within the
-  activity timeout window, `ended` otherwise) so active root and subagent
-  conversations reach **Monitor -> Active Agents** live and follow standard
-  `active -> idle -> ended` sweep transitions. When a `full`-fidelity transcript
-  exists alongside ingested events, `session_trace_summary` preserves
-  `has_full_transcript` coverage.
+  (marking `truncated_fields` visibly at `summary` fidelity), correlating
+  parallel tool calls with native SQLite `ChatToolCall` IDs (`planner_response`
+  field 7 and `steps.metadata` field 4), preserving any trailing unflushed
+  SQLite `steps`, and falling back to `summary`-fidelity (`antigravity-sqlite`)
+  from SQLite `steps` when absent. Verified skill-file reads under recognized
+  skill roots and `CHECKPOINT` compactions feed `session_context_observations`
+  and the skill invocation ledger; parent/subagent lineage combines
+  `conversation_summaries.db` (`parent_conversation_id`, `nesting_depth`,
+  `agent_name`) with explicitly correlated `invoke_subagent` result
+  `conversationId` fields; and Antigravity Git/PR commands enter Git
+  attribution only with confirming correlated results. The same sync also
+  ingests Antigravity `events` (promoting `generic` steps with SQLite
+  `ChatToolCall` metadata to named `tool_use` / `file_change` events) and
+  reconciles `sessions` (`active` within the activity timeout window, `ended`
+  otherwise) so active root and subagent conversations reach **Monitor -> Active
+  Agents** live and follow standard `active -> idle -> ended` sweep transitions.
+  When a `full`-fidelity transcript exists alongside ingested events,
+  `session_trace_summary` preserves `has_full_transcript` coverage.
 
 Context occupancy uses the latest request's prompt size, so it may drop after
 compaction. Codex uses its reported context window when present and otherwise a

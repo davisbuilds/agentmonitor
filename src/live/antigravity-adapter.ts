@@ -31,6 +31,7 @@ function parseMessageBlocks(message: ParsedMessage): ContentBlock[] {
 
 interface ExistingAntigravityProjectionRow {
   project: string | null;
+  cwd: string | null;
   title: string | null;
   first_message: string | null;
   parent_session_id: string | null;
@@ -44,7 +45,7 @@ export function preserveAntigravitySessionMetadata(
   parsed: ParsedSession,
 ): ParsedSession {
   const existing = db.prepare(`
-    SELECT project, title, first_message, parent_session_id, relationship_type,
+    SELECT project, cwd, title, first_message, parent_session_id, relationship_type,
            context_used_tokens, context_window_tokens
     FROM browsing_sessions
     WHERE id = ?
@@ -53,6 +54,7 @@ export function preserveAntigravitySessionMetadata(
 
   const metadata = { ...parsed.metadata };
   metadata.project ??= existing.project;
+  metadata.cwd ??= existing.cwd;
   if (!metadata.title && existing.title) {
     metadata.title = existing.title;
     metadata.first_message = existing.first_message ?? existing.title;
