@@ -211,12 +211,60 @@ export function hasAntigravityNonZeroExit(text: string): boolean {
 
 interface ShellToken {
   value: string;
-  isOutputRedirect: boolean;
-  isInputRedirect: boolean;
+  isRedirect: boolean;
+  skipsNextToken: boolean;
+}
+
+function parseHeredocDelimiter(
+  command: string,
+  start: number,
+): { delimiter: string; nextIdx: number } | null {
+  let i = start;
+  while (i < command.length && (command[i] === ' ' || command[i] === '\t')) i++;
+  if (i >= command.length) return null;
+
+  let delimiter = '';
+  let quote: "'" | '"' | null = null;
+  while (i < command.length) {
+    const ch = command[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else delimiter += ch;
+      i++;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '\\' && i + 1 < command.length) {
+        delimiter += command[i + 1]!;
+        i += 2;
+        continue;
+      }
+      if (ch === '"') quote = null;
+      else delimiter += ch;
+      i++;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < command.length) {
+      delimiter += command[i + 1]!;
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      i++;
+      continue;
+    }
+    if (/[\s;&|<>()]/.test(ch)) break;
+    delimiter += ch;
+    i++;
+  }
+
+  return delimiter ? { delimiter, nextIdx: i } : null;
 }
 
 function splitShellSegments(command: string): string[] {
   const segments: string[] = [];
+  const pendingHeredocs: Array<{ delimiter: string; stripTabs: boolean }> = [];
   let current = '';
   let quote: "'" | '"' | null = null;
 
@@ -247,7 +295,46 @@ function splitShellSegments(command: string): string[] {
       current += ch;
       continue;
     }
-    if (ch === ';' || ch === '\n') {
+    if (ch === '<' && command[i + 1] === '<') {
+      if (command[i + 2] === '<') {
+        current += '<<<';
+        i += 2;
+        continue;
+      }
+      const stripTabs = command[i + 2] === '-';
+      const opLen = stripTabs ? 3 : 2;
+      current += command.slice(i, i + opLen);
+      const parsed = parseHeredocDelimiter(command, i + opLen);
+      if (parsed) {
+        pendingHeredocs.push({ delimiter: parsed.delimiter, stripTabs });
+        current += command.slice(i + opLen, parsed.nextIdx);
+        i = parsed.nextIdx - 1;
+      } else {
+        i += opLen - 1;
+      }
+      continue;
+    }
+    if (ch === '\n') {
+      if (current.trim()) segments.push(current);
+      current = '';
+      if (pendingHeredocs.length > 0) {
+        let cursor = i + 1;
+        while (pendingHeredocs.length > 0 && cursor < command.length) {
+          const target = pendingHeredocs.shift()!;
+          while (cursor <= command.length) {
+            const nextNl = command.indexOf('\n', cursor);
+            const rawLine = nextNl === -1 ? command.slice(cursor) : command.slice(cursor, nextNl);
+            const lineWithoutCr = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+            const normalizedLine = target.stripTabs ? lineWithoutCr.replace(/^\t+/, '') : lineWithoutCr;
+            cursor = nextNl === -1 ? command.length : nextNl + 1;
+            if (normalizedLine === target.delimiter || nextNl === -1) break;
+          }
+        }
+        i = cursor - 1;
+      }
+      continue;
+    }
+    if (ch === ';') {
       if (current.trim()) segments.push(current);
       current = '';
       continue;
@@ -288,7 +375,7 @@ function tokenizeShellSegment(segment: string): ShellToken[] {
 
   const flushWord = () => {
     if (!hasContent) return;
-    tokens.push({ value: current, isOutputRedirect: false, isInputRedirect: false });
+    tokens.push({ value: current, isRedirect: false, skipsNextToken: false });
     current = '';
     hasContent = false;
   };
@@ -347,7 +434,7 @@ function tokenizeShellSegment(segment: string): ShellToken[] {
         op += segment[i + 1]!;
         i++;
       }
-      tokens.push({ value: op, isOutputRedirect: true, isInputRedirect: false });
+      tokens.push({ value: op, isRedirect: true, skipsNextToken: true });
       continue;
     }
     if (ch === '<') {
@@ -359,13 +446,21 @@ function tokenizeShellSegment(segment: string): ShellToken[] {
         flushWord();
       }
       if (segment[i + 1] === '>') {
-        tokens.push({ value: `${fdPrefix}<>`, isOutputRedirect: true, isInputRedirect: false });
+        tokens.push({ value: `${fdPrefix}<>`, isRedirect: true, skipsNextToken: true });
         i++;
       } else if (segment[i + 1] === '<') {
-        tokens.push({ value: `${fdPrefix}<<`, isOutputRedirect: false, isInputRedirect: true });
-        i++;
+        if (segment[i + 2] === '<') {
+          tokens.push({ value: `${fdPrefix}<<<`, isRedirect: true, skipsNextToken: true });
+          i += 2;
+        } else if (segment[i + 2] === '-') {
+          tokens.push({ value: `${fdPrefix}<<-`, isRedirect: true, skipsNextToken: true });
+          i += 2;
+        } else {
+          tokens.push({ value: `${fdPrefix}<<`, isRedirect: true, skipsNextToken: true });
+          i++;
+        }
       } else {
-        tokens.push({ value: `${fdPrefix}<`, isOutputRedirect: false, isInputRedirect: true });
+        tokens.push({ value: `${fdPrefix}<`, isRedirect: true, skipsNextToken: false });
       }
       continue;
     }
@@ -385,15 +480,13 @@ function extractSkillPathMatches(tokens: readonly ShellToken[]): Array<{ fullPat
       skipNext = false;
       continue;
     }
-    if (tok.isOutputRedirect) {
-      skipNext = true;
+    if (tok.isRedirect) {
+      if (tok.skipsNextToken) skipNext = true;
       continue;
     }
-    if (tok.isInputRedirect) continue;
 
     const candidate = tok.value;
-    if (!candidate || !candidate.endsWith('/SKILL.md')) continue;
-    if (!/^(?:~\/|\/|\.[a-zA-Z0-9_.-]*\/)/.test(candidate)) continue;
+    if (!candidate || !candidate.endsWith('/SKILL.md') || candidate.startsWith('-')) continue;
     const skillDir = path.posix.dirname(candidate);
     const skillName = path.posix.basename(skillDir).trim();
     if (isConcreteSkillName(skillName)) {
@@ -423,16 +516,15 @@ function extractFileReadSegmentTokens(command: string): ShellToken[][] {
     let idx = 0;
     while (
       idx < tokens.length
-      && !tokens[idx]!.isOutputRedirect
-      && !tokens[idx]!.isInputRedirect
+      && !tokens[idx]!.isRedirect
       && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[idx]!.value)
     ) {
       idx++;
     }
     const cmdToken = tokens[idx];
-    if (!cmdToken || cmdToken.isOutputRedirect || cmdToken.isInputRedirect) continue;
+    if (!cmdToken || cmdToken.isRedirect) continue;
     const base = path.posix.basename(cmdToken.value.replaceAll('\\', '/'));
-    if (SHELL_READ_COMMANDS.has(base)) readSegments.push(tokens);
+    if (SHELL_READ_COMMANDS.has(base)) readSegments.push(tokens.slice(idx + 1));
   }
   return readSegments;
 }

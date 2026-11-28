@@ -1387,4 +1387,102 @@ describe('Antigravity Slice 4: skills, child sessions, Git attribution, and shar
       assert.equal(bySkill[forbidden], undefined, `must not emit skill consultation for ${forbidden}`);
     }
   });
+
+  test('ignores heredoc bodies and here-strings while resolving plain relative skill paths against cwd and extraRoots', async () => {
+    const { extractAntigravitySkillNamesFromToolCall } = await import('../src/skills/invocation-detection.js');
+    assert.deepEqual(
+      extractAntigravitySkillNamesFromToolCall(
+        'run_command',
+        JSON.stringify({ CommandLine: 'cat skills/local/SKILL.md' }),
+        { cwd: '/repo', extraRoots: ['/repo/skills'] },
+      ),
+      ['local'],
+    );
+
+    const home = path.join(tempDir, 'agr-heredoc-and-relative');
+    const sessionId = 'b0b0b0b0-1111-2222-3333-b0b0b0b0b0b0';
+    const t0 = Date.parse('2026-12-01T10:00:00Z') / 1000;
+
+    const heredocSingleCmd = "cat <<'EOF'\ncat /Users/example/.agents/skills/heredoc-single/SKILL.md\nEOF";
+    const heredocTabCmd = 'cat <<-EOF\n\tcat /Users/example/.agents/skills/heredoc-tab/SKILL.md\n\tEOF';
+    const hereStringCmd = 'cat <<< /Users/example/.agents/skills/herestring-mention/SKILL.md';
+    const plainRelativeCmd = 'cat catalog/local/SKILL.md';
+
+    const callHeredocSingle: ProtoToolCallSpec = {
+      id: 'call_heredoc_single',
+      name: 'run_command',
+      argsJson: JSON.stringify({ CommandLine: heredocSingleCmd }),
+    };
+    const callHeredocTab: ProtoToolCallSpec = {
+      id: 'call_heredoc_tab',
+      name: 'run_command',
+      argsJson: JSON.stringify({ CommandLine: heredocTabCmd }),
+    };
+    const callHereString: ProtoToolCallSpec = {
+      id: 'call_herestring',
+      name: 'run_command',
+      argsJson: JSON.stringify({ CommandLine: hereStringCmd }),
+    };
+    const callPlainRelative: ProtoToolCallSpec = {
+      id: 'call_plain_relative',
+      name: 'run_command',
+      argsJson: JSON.stringify({ CommandLine: plainRelativeCmd }),
+    };
+
+    writeConversationDb(path.join(home, 'conversations', `${sessionId}.db`), {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: t0 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: t0 + 1, plannerToolCalls: [callHeredocSingle, callHeredocTab, callHereString, callPlainRelative] },
+        { idx: 2, type: 132, oneof: 140, status: 3, tsSecs: t0 + 2, stepToolCall: callHeredocSingle },
+        { idx: 3, type: 132, oneof: 140, status: 3, tsSecs: t0 + 3, stepToolCall: callHeredocTab },
+        { idx: 4, type: 132, oneof: 140, status: 3, tsSecs: t0 + 4, stepToolCall: callHereString },
+        { idx: 5, type: 132, oneof: 140, status: 3, tsSecs: t0 + 5, stepToolCall: callPlainRelative },
+      ],
+      generations: [
+        { model: 'gemini-4-neon', inp: 600, out: 90, cached: 400, createdSecs: t0 + 1 },
+      ],
+    });
+    writeSummaryDb(home, [{
+      conversation_id: sessionId,
+      title: 'Heredoc and plain relative path edge cases',
+      workspace_uris: JSON.stringify([`file://${tempDir}`]),
+    }]);
+    writeTranscript(home, sessionId, [
+      { step_index: 0, type: 'USER_INPUT', status: 'DONE', created_at: '2026-12-01T10:00:00Z', content: 'Check heredoc and relative reads' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-12-01T10:00:01Z',
+        tool_calls: [
+          { name: 'run_command', args: { CommandLine: heredocSingleCmd } },
+          { name: 'run_command', args: { CommandLine: heredocTabCmd } },
+          { name: 'run_command', args: { CommandLine: hereStringCmd } },
+          { name: 'run_command', args: { CommandLine: plainRelativeCmd } },
+        ],
+      },
+      { step_index: 2, type: 'GENERIC', status: 'DONE', created_at: '2026-12-01T10:00:02Z', content: 'Command exited with code 0.' },
+      { step_index: 3, type: 'GENERIC', status: 'DONE', created_at: '2026-12-01T10:00:03Z', content: 'Command exited with code 0.' },
+      { step_index: 4, type: 'GENERIC', status: 'DONE', created_at: '2026-12-01T10:00:04Z', content: 'Command exited with code 0.' },
+      { step_index: 5, type: 'GENERIC', status: 'DONE', created_at: '2026-12-01T10:00:05Z', content: 'Command exited with code 0.\n# local skill' },
+    ]);
+
+    const db = getDb();
+    assert.equal(syncAllAntigravityFiles(db, home).parsed, 1);
+
+    const ctx = getSessionSkillContext(db, sessionId);
+    assert.ok(ctx);
+    assert.deepEqual(
+      ctx.observations.filter(o => o.kind === 'consultation').map(o => o.skillName),
+      ['local'],
+    );
+
+    const daily = getAnalyticsSkillsDaily({ agent: 'antigravity', date_from: '2026-12-01', date_to: '2026-12-01' });
+    assert.equal(daily.length, 1);
+    const bySkill = Object.fromEntries(daily[0].skills.map(s => [s.skill_name, s.count]));
+    assert.deepEqual(bySkill, { local: 1 });
+    for (const forbidden of ['heredoc-single', 'heredoc-tab', 'herestring-mention']) {
+      assert.equal(bySkill[forbidden], undefined, `must not emit skill consultation for ${forbidden}`);
+    }
+  });
 });
