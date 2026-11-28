@@ -421,8 +421,11 @@ function takeMatchingPendingCall(
   entry: AntigravityTranscriptEntry,
   entryType: string,
   sqliteStepCall?: AntigravityChatToolCall,
+  consume = true,
 ): PendingToolCall | undefined {
   if (pending.length === 0) return undefined;
+
+  const takeAt = (idx: number): PendingToolCall => (consume ? pending.splice(idx, 1)[0]! : pending[idx]!);
 
   const explicitCallId = asNonEmptyString(entry.tool_call_id)
     ?? asNonEmptyString(entry.call_id)
@@ -431,7 +434,7 @@ function takeMatchingPendingCall(
     const matchIdx = pending.findIndex(
       call => call.nativeId === explicitCallId || call.id === explicitCallId,
     );
-    return matchIdx !== -1 ? pending.splice(matchIdx, 1)[0] : undefined;
+    return matchIdx !== -1 ? takeAt(matchIdx) : undefined;
   }
 
   if (entryType && entryType !== 'GENERIC') {
@@ -440,13 +443,13 @@ function takeMatchingPendingCall(
       if (entryMatchesToolName(entryType, call.name)) matches.push(index);
     });
     if (matches.length === 1) {
-      return pending.splice(matches[0]!, 1)[0];
+      return takeAt(matches[0]!);
     }
     return undefined;
   }
 
   if (pending.length === 1) {
-    return pending.shift();
+    return takeAt(0);
   }
   return undefined;
 }
@@ -702,17 +705,22 @@ export function parseAntigravityTranscript(
     const sqliteStepCall = hasStepIndex
       ? options?.stepCorrelation?.get(entry.step_index as number)?.stepToolCall
       : undefined;
-    const matchedCall = takeMatchingPendingCall(pendingCalls, entry, entryType, sqliteStepCall);
+    const isRunning = entry.status === 'RUNNING';
+    const hasEntryError = entry.status === 'ERROR' || Boolean(typeof entry.error === 'string' && entry.error.trim());
+    const matchedCall = takeMatchingPendingCall(
+      pendingCalls,
+      entry,
+      entryType,
+      sqliteStepCall,
+      !(isRunning && !hasEntryError),
+    );
     const resultText = formatToolResultContent(entry, truncatedFields);
     const isShellFailure = Boolean(
       matchedCall
       && isAntigravityShellTool(matchedCall.name)
       && hasAntigravityNonZeroExit(resultText),
     );
-    const isError = entry.status === 'ERROR'
-      || Boolean(typeof entry.error === 'string' && entry.error.trim())
-      || isShellFailure;
-    const isRunning = entry.status === 'RUNNING';
+    const isError = hasEntryError || isShellFailure;
     if (matchedCall && !isError && !isRunning) {
       if (matchedCall.name === 'invoke_subagent') {
         const childId = extractSubagentConversationId(entry, resultText, sessionId);

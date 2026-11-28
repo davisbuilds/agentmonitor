@@ -2903,6 +2903,7 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
   const result = db.prepare(`
     SELECT status, payload_json FROM session_items
     WHERE kind = 'tool_result' AND source_item_id IN (?, ?) AND session_id IN (?, ?)
+    ORDER BY ordinal DESC, id DESC
     LIMIT 1
   `);
   const resultInfoOf = (sessionId: string, toolUseId: string | null): { status: string | null; payload: string } | null => {

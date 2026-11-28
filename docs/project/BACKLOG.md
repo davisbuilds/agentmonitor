@@ -132,6 +132,86 @@ so later readers know what still needs checking.
   Expose usage-only versus browsable coverage explicitly without fabricating
   transcripts, and audit each aggregate before calling its count conversations.
 
+### Converge v1 (`events`/`sessions`) and v2 (`browsing_sessions`/`session_items`) live projections
+
+- **What**: Eliminate the dual-store projection split where each harness
+  maintains two separate ingestion pipelines (`import_state` -> `events`/`sessions`
+  and `watched_files` -> `browsing_sessions`/`session_items`), a third
+  reconciliation layer (`session_trace_summary`), and separate UI readers
+  (Monitor Active Agents on v1 versus Live on v2).
+- **Why or evidence**: observed during the 2026-11-27 Antigravity parity work
+  (complementing "Consistent session identity and parent/child coverage across
+  read surfaces" above). Maintaining parallel write paths per provider creates
+  cross-store drift, forces metadata-preservation guards to prevent one
+  pipeline from clobbering fields owned by the other, and multiplies the work
+  required to add or update any harness.
+- **Next**: converge Monitor Active Agents onto the v2 live projection, or
+  enforce a single unified write path per provider snapshot that updates every
+  derived read surface atomically.
+
+### Formal `HarnessAdapter` boundary and `turn_end` vs `session_end` lifecycle semantics
+
+- **What**: Separate per-turn `turn_end` from conversation-level `session_end`
+  in the shared event model and formalize a single `HarnessAdapter` contract
+  covering discovery, change tokens, snapshot reading, lifecycle mapping, and
+  late-watcher attachment.
+- **Why or evidence**: observed during the 2026-11-27 Antigravity parity work.
+  Onboarding a new provider touched roughly 15–20 core files with
+  provider-specific branches across import, watcher, quotas, trace quality, and
+  the frontend; in particular, `frontend/src/lib/stores/monitor.svelte.ts`
+  required an Antigravity-specific guard because per-turn `finish` steps mapped
+  onto `session_end`.
+- **Next**: introduce an explicit `turn_end` event type distinct from
+  `session_end` across backend and frontend consumers, and extract a typed
+  `HarnessAdapter` interface registered in one place rather than branching on
+  agent names throughout core modules.
+
+### Read-only `--dry-run`, faster service startup readiness, and `amon service start`
+
+- **What**: Make preview/repair `--dry-run` commands read-only, bind the HTTP
+  listener before running full startup scans, and add an `amon service start`
+  subcommand alongside `stop` and `restart`.
+- **Why or evidence**: observed during the 2026-11-27 Antigravity parity work.
+  Rollback-based `--dry-run` commands acquire a write lock on the live SQLite
+  database and can hit `SQLITE_BUSY` / `database is locked` while the server's
+  startup scan runs; on large multi-GB databases, startup sync also delays HTTP
+  `/api/health` readiness; and `amon service` exposes `stop` and `restart`
+  without a symmetric `start` command.
+- **Next**: compute `--dry-run` diffs against a read-only connection without
+  opening a write transaction, start listening for `/api/health` before kicking
+  off the background startup sweep, and add `amon service start`.
+
+### Versioned parsers (`parser_version`) and persisted `source_ref` for deterministic re-ingestion
+
+- **What**: Persist a `parser_version` alongside `import_state` and
+  `watched_files` and store a structured `source_ref` on imported events so
+  decoder fixes or ID migrations can re-project affected rows deterministically.
+- **Why or evidence**: observed during the 2026-11-27 Antigravity parity work.
+  Because `import_state` hashes source files and `events` deduplicates via
+  `INSERT OR IGNORE`, changing decoder logic or canonical event IDs (such as
+  Antigravity enum accounting fixes and ordinal-to-canonical ID migration)
+  currently requires bespoke `repair-*` CLI commands with fragile row-pairing
+  heuristics.
+- **Next**: add `parser_version` tracking to ingestion state tables and record
+  stable `source_ref` provenance on imported events so bumping a parser version
+  cleanly replaces superseded projections without one-off repair scripts.
+
+### Separate pure string path normalization from filesystem-probing resolvers at HTTP boundaries
+
+- **What**: Split pure string path/project-identity normalization from
+  filesystem-probing helpers across `src/util/`, and enforce a central field
+  allowlist and payload size cap on `provider_quotas.raw_payload` for all
+  providers.
+- **Why or evidence**: observed during the 2026-11-27 Antigravity parity work.
+  Passing untrusted HTTP `req.body` paths into filesystem-probing helpers such
+  as `src/util/project-identity.ts` creates path-taint risks at API boundaries,
+  and raw statusline payloads can store large unvalidated blobs in
+  `provider_quotas.raw_payload`.
+- **Next**: audit `src/util/` helpers called from HTTP routes so route handlers
+  only invoke pure string normalizers (leaving filesystem probing strictly to
+  local importers/watchers), and apply a shared allowlist and byte cap before
+  persisting `provider_quotas.raw_payload`.
+
 ### Codex thread names and app-job detection
 
 - **What**: Codex sessions are titled by their first real prompt, or a subagent

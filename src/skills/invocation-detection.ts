@@ -209,15 +209,53 @@ export function hasAntigravityNonZeroExit(text: string): boolean {
   return /Command exited with code (?!0\b)-?\d+/.test(text);
 }
 
+const OUTPUT_REDIRECT_OPERATOR = /^(?:\d+|&)?(?:>>?\|?|<>)$/;
+const OUTPUT_REDIRECT_PREFIX = /^(?:\d+|&)?(?:>>?\|?|<>)/;
+const INPUT_REDIRECT_PREFIX = /^(?:\d+)?<(?!<|>)/;
+
+function stripSurroundingQuotes(token: string): string {
+  if (
+    token.length >= 2
+    && ((token.startsWith("'") && token.endsWith("'")) || (token.startsWith('"') && token.endsWith('"')))
+  ) {
+    return token.slice(1, -1);
+  }
+  return token;
+}
+
 function extractSkillPathMatches(segment: string): Array<{ fullPath: string; skillName: string }> {
   const matches: Array<{ fullPath: string; skillName: string }> = [];
-  for (const rawToken of segment.split(/[\s'"]+/)) {
-    if (!rawToken || !rawToken.endsWith('/SKILL.md')) continue;
-    if (!/^(?:~\/|\/|\.[a-zA-Z0-9_.-]*\/)/.test(rawToken)) continue;
-    const skillDir = path.posix.dirname(rawToken);
+  let skipNext = false;
+  for (const rawToken of segment.trim().split(/\s+/)) {
+    if (!rawToken) continue;
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (OUTPUT_REDIRECT_OPERATOR.test(rawToken)) {
+      skipNext = true;
+      continue;
+    }
+    if (OUTPUT_REDIRECT_PREFIX.test(rawToken)) continue;
+
+    let candidate = rawToken;
+    const isQuoted = (candidate.startsWith("'") && candidate.endsWith("'"))
+      || (candidate.startsWith('"') && candidate.endsWith('"'));
+    if (!isQuoted) {
+      const gtIdx = candidate.indexOf('>');
+      if (gtIdx !== -1) {
+        if (gtIdx === candidate.length - 1) skipNext = true;
+        candidate = candidate.slice(0, gtIdx);
+      }
+      candidate = candidate.replace(INPUT_REDIRECT_PREFIX, '');
+    }
+    candidate = stripSurroundingQuotes(candidate);
+    if (!candidate || !candidate.endsWith('/SKILL.md')) continue;
+    if (!/^(?:~\/|\/|\.[a-zA-Z0-9_.-]*\/)/.test(candidate)) continue;
+    const skillDir = path.posix.dirname(candidate);
     const skillName = path.posix.basename(skillDir).trim();
     if (isConcreteSkillName(skillName)) {
-      matches.push({ fullPath: rawToken, skillName });
+      matches.push({ fullPath: candidate, skillName });
     }
   }
   return matches;

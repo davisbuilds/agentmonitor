@@ -1134,4 +1134,164 @@ describe('Antigravity Slice 4: skills, child sessions, Git attribution, and shar
       [['read_file', 2000], ['run_command', 12000]],
     );
   });
+
+  test('peeks pending calls on RUNNING receipts so later DONE receipts keep tool_use_id, and ignores shell output-redirection targets', async () => {
+    const home = path.join(tempDir, 'agr-running-and-redir');
+    const parentId = '90909090-1111-2222-3333-909090909090';
+    const childId = '90909090-4444-5555-6666-909090909091';
+    const repoCwd = path.join(tempDir, 'running-redir-repo');
+    fs.mkdirSync(repoCwd, { recursive: true });
+
+    const t0 = Date.parse('2026-11-29T10:00:00Z') / 1000;
+    const callRedirOnly: ProtoToolCallSpec = {
+      id: 'call_redir_only',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: 'cat /dev/null > /Users/example/.agents/skills/redir-generated/SKILL.md',
+      }),
+    };
+    const callRedirAttached: ProtoToolCallSpec = {
+      id: 'call_redir_attached',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: 'cat /dev/null >>/Users/example/.agents/skills/redir-attached/SKILL.md',
+      }),
+    };
+    const callRedirCopy: ProtoToolCallSpec = {
+      id: 'call_redir_copy',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: 'cat /Users/example/.agents/skills/redir-source/SKILL.md >> /Users/example/.agents/skills/redir-dest/SKILL.md',
+      }),
+    };
+
+    writeConversationDb(path.join(home, 'conversations', `${parentId}.db`), {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: t0 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: t0 + 1 },
+        { idx: 2, type: 132, oneof: 140, status: 6, tsSecs: t0 + 2 },
+        { idx: 3, type: 132, oneof: 140, status: 3, tsSecs: t0 + 3 },
+        { idx: 4, type: 15, oneof: 20, tsSecs: t0 + 4 },
+        { idx: 5, type: 132, oneof: 140, status: 6, tsSecs: t0 + 5 },
+        { idx: 6, type: 132, oneof: 140, status: 3, tsSecs: t0 + 6 },
+        { idx: 7, type: 15, oneof: 20, tsSecs: t0 + 7, plannerToolCalls: [callRedirOnly, callRedirAttached, callRedirCopy] },
+        { idx: 8, type: 132, oneof: 140, status: 3, tsSecs: t0 + 8, stepToolCall: callRedirOnly },
+        { idx: 9, type: 132, oneof: 140, status: 3, tsSecs: t0 + 9, stepToolCall: callRedirAttached },
+        { idx: 10, type: 132, oneof: 140, status: 3, tsSecs: t0 + 10, stepToolCall: callRedirCopy },
+      ],
+      generations: [
+        { model: 'gemini-4-neon', inp: 800, out: 120, cached: 900, createdSecs: t0 + 1 },
+      ],
+    });
+    writeConversationDb(path.join(home, 'conversations', `${childId}.db`), {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: t0 + 6 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: t0 + 7 },
+      ],
+      generations: [
+        { model: 'gemini-4-neon', inp: 200, out: 40, cached: 0, createdSecs: t0 + 7 },
+      ],
+    });
+    writeSummaryDb(home, [
+      {
+        conversation_id: parentId,
+        title: 'Running peek and redirect guard',
+        workspace_uris: JSON.stringify([`file://${repoCwd}`]),
+      },
+      {
+        conversation_id: childId,
+        title: '',
+        workspace_uris: JSON.stringify([`file://${repoCwd}`]),
+      },
+    ]);
+    writeTranscript(home, parentId, [
+      { step_index: 0, type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-29T10:00:00Z', content: 'Run delayed skill read and subagent' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-29T10:00:01Z',
+        tool_calls: [{ name: 'read_file', args: { Path: '/Users/example/.gemini/config/skills/delayed-skill/SKILL.md' } }],
+      },
+      {
+        step_index: 2,
+        type: 'GENERIC',
+        status: 'RUNNING',
+        created_at: '2026-11-29T10:00:02Z',
+        content: 'Reading file...',
+      },
+      {
+        step_index: 3,
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-29T10:00:03Z',
+        content: '1: ---\n2: name: delayed-skill\n---',
+      },
+      {
+        step_index: 4,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-29T10:00:04Z',
+        tool_calls: [{ name: 'invoke_subagent', args: { TypeName: 'self', Role: 'Delayed Child Engineer', Prompt: 'Inspect' } }],
+      },
+      {
+        step_index: 5,
+        type: 'GENERIC',
+        status: 'RUNNING',
+        created_at: '2026-11-29T10:00:05Z',
+        content: 'Spawning subagent...',
+      },
+      {
+        step_index: 6,
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-29T10:00:06Z',
+        content: `Created the following subagent:\n${JSON.stringify({ conversationId: childId })}`,
+      },
+      {
+        step_index: 7,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-29T10:00:07Z',
+        tool_calls: [
+          { name: 'run_command', args: { CommandLine: 'cat /dev/null > /Users/example/.agents/skills/redir-generated/SKILL.md' } },
+          { name: 'run_command', args: { CommandLine: 'cat /dev/null >>/Users/example/.agents/skills/redir-attached/SKILL.md' } },
+          { name: 'run_command', args: { CommandLine: 'cat /Users/example/.agents/skills/redir-source/SKILL.md >> /Users/example/.agents/skills/redir-dest/SKILL.md' } },
+        ],
+      },
+      { step_index: 8, type: 'GENERIC', status: 'DONE', created_at: '2026-11-29T10:00:08Z', content: 'Command exited with code 0.' },
+      { step_index: 9, type: 'GENERIC', status: 'DONE', created_at: '2026-11-29T10:00:09Z', content: 'Command exited with code 0.' },
+      { step_index: 10, type: 'GENERIC', status: 'DONE', created_at: '2026-11-29T10:00:10Z', content: 'Command exited with code 0.' },
+    ]);
+    writeTranscript(home, childId, [
+      { step_index: 0, type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-29T10:00:06Z', content: 'Inspect' },
+      { step_index: 1, type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-11-29T10:00:07Z', content: 'Done' },
+    ]);
+
+    const db = getDb();
+    assert.equal(syncAllAntigravityFiles(db, home).parsed, 2);
+
+    const children = getSessionChildren(parentId);
+    assert.equal(children.length, 1);
+    assert.equal(children[0].id, childId);
+    assert.equal(children[0].title, 'Delayed Child Engineer');
+
+    const ctx = getSessionSkillContext(db, parentId);
+    assert.ok(ctx);
+    assert.deepEqual(
+      ctx.observations.filter(o => o.kind === 'consultation').map(o => o.skillName),
+      ['delayed-skill', 'redir-source'],
+    );
+
+    const daily = getAnalyticsSkillsDaily({ agent: 'antigravity', date_from: '2026-11-29', date_to: '2026-11-29' });
+    assert.equal(daily.length, 1);
+    const bySkill = Object.fromEntries(daily[0].skills.map(s => [s.skill_name, s.count]));
+    assert.deepEqual(bySkill, {
+      'delayed-skill': 1,
+      'redir-source': 1,
+    });
+    for (const forbidden of ['redir-generated', 'redir-attached', 'redir-dest']) {
+      assert.equal(bySkill[forbidden], undefined, `must not emit skill consultation for ${forbidden}`);
+    }
+  });
 });
