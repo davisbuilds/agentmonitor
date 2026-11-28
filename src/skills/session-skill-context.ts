@@ -6,6 +6,7 @@ import type {
   SessionSkillContext,
   SessionSkillContextObservation,
   SkillCatalogBudget,
+  SkillCatalogCurrentSource,
   SkillCatalogPresentationEntry,
   SkillCatalogPresentationMeasurement,
   SkillCatalogPresentationOccurrence,
@@ -31,18 +32,32 @@ import {
   type SessionSkillContextSessionRow,
 } from '../db/v2-queries.js';
 import { verifyPersistedExpectedRealization } from './expected-realizations.js';
+import { hasCurrentCodexContextEvidence } from './codex-evidence-version.js';
+import { CODEX_CATALOG_SOURCE_ENTRIES } from './codex-catalog.js';
+import type { CodexCatalogSource } from './context-observations.js';
 
 const MAX_OBSERVATIONS = 4_096;
 const MAX_CATALOG_ENTRIES = 16_384;
 const MAX_INSTRUCTION_EVENTS = 4_096;
 const CATALOG_MEASUREMENT_METHOD = 'retained_catalog_block_utf8_bytes/v1';
 const LEGACY_CATALOG_MEASUREMENT_METHOD = 'skill_catalog_presentation/v1';
+const UNVERIFIED_CODEX = 'codex_context_evidence_unverified';
+const CODEX_CATALOG_REASONS = new Set([
+  'catalog_payload_limit', 'catalog_format_unsupported', 'catalog_turn_context_unavailable',
+  'catalog_timestamp_unavailable', 'catalog_delta_without_base', 'catalog_compaction_unverified',
+  'catalog_rollback', 'catalog_truncation_observed', 'malformed_source_record', 'context_history_limit',
+]);
+const CODEX_DIAGNOSTICS = new Set([
+  ...CODEX_CATALOG_REASONS, 'instruction_signal_unsupported', 'instruction_payload_limit',
+]);
 
 interface StoredCapabilities {
   orderedConsultations?: { observable?: boolean; reason?: string };
   compactionVisibility?: { observable?: boolean; reason?: string };
   catalogPresentation?: { observable?: boolean; reason?: string };
   instructionLoads?: { observable?: boolean; reason?: string };
+  codexCatalogSources?: unknown;
+  diagnostics?: unknown;
 }
 
 interface OccurrenceRuntime {
@@ -436,6 +451,51 @@ function catalogBudget(
   };
 }
 
+function codexCatalogSource(value: unknown): CodexCatalogSource | undefined {
+  return value === 'host' || value === 'cloud' || value === 'selected-environment' || value === 'legacy'
+    ? value : undefined;
+}
+
+function codexCatalogCurrent(value: unknown): SkillCatalogCurrentSource[] {
+  if (!Array.isArray(value) || value.length > 4) return [];
+  const bySource = new Map<CodexCatalogSource, SkillCatalogCurrentSource>();
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const source = codexCatalogSource(item['source']);
+    if (!source || bySource.has(source)) continue;
+    const position = { source, observedAt: optionalString(item['observedAt']), projectIdentity: optionalString(item['projectIdentity']) };
+    const reason = optionalString(item['reason']);
+    if (item['status'] === 'unknown' && reason && CODEX_CATALOG_REASONS.has(reason)) {
+      bySource.set(source, { ...position, status: 'unknown', reason });
+      continue;
+    }
+    const basis = item['basis'];
+    const entries = item['entries'];
+    if (item['status'] !== 'observed' || (basis !== 'full' && basis !== 'delta')
+      || !Array.isArray(entries) || entries.length > CODEX_CATALOG_SOURCE_ENTRIES) continue;
+    const projected = entries.flatMap((entry, ordinal) => {
+      if (!isRecord(entry) || typeof entry['name'] !== 'string') return [];
+      return [{
+        ordinal, name: entry['name'], description: optionalString(entry['description']),
+        descriptionFingerprint: optionalString(entry['descriptionFingerprint']),
+        sourceLocation: optionalString(entry['sourceLocation']), sourceScope: optionalString(entry['scope']),
+      }];
+    });
+    if (projected.length === entries.length) {
+      bySource.set(source, { ...position, status: 'observed', basis, entries: projected });
+    }
+  }
+  return [...bySource.values()];
+}
+
+function unavailableCatalog(reason: string): SkillCatalogPresentationState {
+  return {
+    observable: false, reason, occurrences: [],
+    comparison: { status: 'unavailable', reason: 'presentation_unobservable' },
+    budget: { status: 'unknown', reason: 'measurement_unavailable' },
+  };
+}
+
 function catalogState(
   session: SessionSkillContextSessionRow,
   capabilities: StoredCapabilities,
@@ -447,26 +507,13 @@ function catalogState(
   const presentationRows = observations.filter(
     observation => observation.kind === 'catalog_presentation',
   );
-  if (
-    capabilities.catalogPresentation?.observable !== true
-    || presentationRows.length === 0
-  ) {
-    const reason = capabilities.catalogPresentation?.reason === 'harness_signal_unavailable'
-      ? 'harness_signal_unavailable'
-      : 'presentation_signal_absent';
-    return {
-      observable: false,
-      reason,
-      occurrences: [],
-      comparison: {
-        status: 'unavailable',
-        reason: 'presentation_unobservable',
-      },
-      budget: {
-        status: 'unknown',
-        reason: 'measurement_unavailable',
-      },
-    };
+  const codex = session.agent === 'codex';
+  const current = codex ? { current: codexCatalogCurrent(capabilities.codexCatalogSources) } : {};
+  if (capabilities.catalogPresentation?.observable !== true || presentationRows.length === 0) {
+    const signal = capabilities.catalogPresentation?.reason;
+    const reason = signal === 'harness_signal_unavailable' || (codex && signal && CODEX_CATALOG_REASONS.has(signal))
+      ? signal : 'presentation_signal_absent';
+    return { ...unavailableCatalog(reason), ...current };
   }
 
   const entries = catalogEntriesByObservation(entryRows);
@@ -475,7 +522,14 @@ function catalogState(
     const metadata = parseRecord(row.metadata_json) ?? {};
     const measurement = catalogMeasurement(metadata);
     const runtime = occurrenceRuntime(metadata);
+    const catalogKind = metadata['catalogKind'] === 'full' || metadata['catalogKind'] === 'delta'
+      ? metadata['catalogKind'] : undefined;
+    const catalogSource = codexCatalogSource(metadata['catalogSource']);
+    const catalogScope = metadata['scope'] === 'source' || metadata['scope'] === 'harness' ? metadata['scope'] : undefined;
+    const scopedForComparison = !codex || (catalogKind === 'full' && catalogSource === 'legacy'
+      && catalogScope === 'harness' && occurrenceTruncation(metadata) !== 'observed');
     return {
+      ...(codex ? { catalogKind, catalogSource, catalogScope } : {}),
       observationId: row.id,
       ordinal: row.ordinal,
       source: row.source,
@@ -486,23 +540,23 @@ function catalogState(
       measurement,
       truncation: occurrenceTruncation(metadata),
       runtime,
-      comparison: comparePresentation(
+      comparison: scopedForComparison ? comparePresentation(
         occurrenceEntries,
         row.observed_at,
         expected,
         expectedRow,
-      ),
-      budget: catalogBudget(
+      ) : { status: 'unavailable', reason: 'catalog_scope_unverified' },
+      budget: scopedForComparison ? catalogBudget(
         session,
         row.observed_at,
         measurement,
         runtime,
         expected,
         expectedRow,
-      ),
+      ) : { status: 'unknown', reason: 'policy_scope_mismatch' },
     };
   });
-  return { observable: true, occurrences };
+  return { observable: true, occurrences, ...current };
 }
 
 function instructionOccurrenceFromMetadata(
@@ -565,13 +619,10 @@ function codexInstructionState(
   observations: SessionSkillContextObservationRow[],
 ): SkillInstructionReachState {
   if (capabilities.instructionLoads?.observable !== true) {
-    return {
-      observable: false,
-      reason: capabilities.instructionLoads?.reason === 'harness_signal_unavailable'
-        ? 'harness_signal_unavailable'
-        : 'instruction_load_signal_absent',
-      occurrences: [],
-    };
+    const signal = capabilities.instructionLoads?.reason;
+    const reason = signal === 'instruction_signal_unsupported' || signal === 'instruction_payload_limit'
+      || signal === 'harness_signal_unavailable' ? signal : 'instruction_load_signal_absent';
+    return { observable: false, reason, occurrences: [] };
   }
   const occurrences = observations
     .filter(observation => observation.kind === 'instruction_load')
@@ -600,6 +651,26 @@ export function getSessionSkillContext(
   if (!session || (session.agent !== 'claude' && session.agent !== 'codex' && session.agent !== 'antigravity')) {
     return null;
   }
+  const responseContext = {
+    sessionId: session.id,
+    harness: session.agent,
+    startedAt: session.started_at,
+    endedAt: session.ended_at,
+    active: isOpenLiveStatus(session.live_status),
+  } as const;
+  const expectedRow = selectSessionExpectedRealizationPersistenceRow(db, sessionId);
+  const expected = session.agent === 'antigravity'
+    ? null : parseExpectedRealization(expectedRow, session.agent);
+  if (session.agent === 'codex' && !hasCurrentCodexContextEvidence(session.skill_context_capabilities_json)) {
+    return {
+      ...responseContext,
+      consultationClassification: { observable: false, reason: UNVERIFIED_CODEX },
+      observations: [],
+      catalog: { ...unavailableCatalog(UNVERIFIED_CODEX), current: [] },
+      expectedRealization: expectedState(expectedRow, expected),
+      instructions: { observable: false, reason: UNVERIFIED_CODEX, occurrences: [] },
+    };
+  }
   const observations = boundedRows(
     selectSessionSkillContextObservations(db, sessionId, MAX_OBSERVATIONS + 1),
     MAX_OBSERVATIONS,
@@ -627,17 +698,13 @@ export function getSessionSkillContext(
     observations,
     classification.observable,
   );
-  const expectedRow = selectSessionExpectedRealizationPersistenceRow(db, sessionId);
-  const expected = session.agent === 'claude' || session.agent === 'codex'
-    ? parseExpectedRealization(expectedRow, session.agent)
-    : null;
+  const recordedDiagnostics = capabilities.diagnostics;
+  const diagnostics = session.agent === 'codex' && Array.isArray(recordedDiagnostics)
+    ? [...CODEX_DIAGNOSTICS].filter(reason => recordedDiagnostics.includes(reason)) : [];
 
   return {
-    sessionId: session.id,
-    harness: session.agent,
-    startedAt: session.started_at,
-    endedAt: session.ended_at,
-    active: isOpenLiveStatus(session.live_status),
+    ...responseContext,
+    ...(diagnostics.length ? { diagnostics } : {}),
     consultationClassification: classification.observable
       ? { observable: true }
       : {

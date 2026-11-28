@@ -68,6 +68,7 @@ function capabilities(options: {
       reason: 'instruction_load_signal_absent',
     },
     diagnostics: [],
+    codexEvidenceVersion: 1,
   });
 }
 
@@ -215,6 +216,9 @@ function runtimeMetadata(
 ): Record<string, unknown> {
   return {
     measurement,
+    catalogKind: 'full',
+    catalogSource: 'legacy',
+    scope: 'harness',
     truncation: 'unknown',
     runtime: {
       harnessVersion: '0.145.0',
@@ -801,4 +805,27 @@ test('rejects a content-hashed realization with an incomplete policy artifact', 
 
 test('returns null for an unknown session', () => {
   assert.equal(getSessionSkillContext(db, 'missing-session'), null);
+});
+
+test('legacy unverified Codex context is unavailable even when old rows exceed projection bounds', () => {
+  const sessionId = 'codex-legacy-unverified';
+  insertSession(sessionId, 'codex', JSON.stringify({
+    orderedConsultations: { observable: true },
+    compactionVisibility: { observable: true },
+    catalogPresentation: { observable: true },
+    instructionLoads: { observable: true },
+  }));
+  db.prepare(`
+    WITH RECURSIVE counter(i) AS (
+      VALUES (1) UNION ALL SELECT i + 1 FROM counter WHERE i < 4097
+    )
+    INSERT INTO session_context_observations (session_id, ordinal, kind, source)
+    SELECT ?, i, 'catalog_presentation', 'codex_replacement_history' FROM counter
+  `).run(sessionId);
+  const result = getSessionSkillContext(db, sessionId)!;
+  assert.deepEqual(result.observations, []);
+  assert.deepEqual(result.consultationClassification, { observable: false, reason: 'codex_context_evidence_unverified' });
+  assert.equal(result.catalog.observable, false);
+  if (!result.catalog.observable) assert.equal(result.catalog.reason, 'codex_context_evidence_unverified');
+  assert.deepEqual(result.instructions, { observable: false, reason: 'codex_context_evidence_unverified', occurrences: [] });
 });

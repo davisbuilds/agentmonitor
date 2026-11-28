@@ -1,14 +1,12 @@
-import path from 'path';
 import type { ContentBlock, ParsedChunk, ParsedSession, ParsedMessage, ParsedToolCall, ParsedToolReceipt } from './claude-code.js';
 import { config } from '../config.js';
 import { findSubagentBoundary } from './codex-subagent-boundary.js';
 import { codexSubagentTitle, promptTitleFromTexts } from './session-title.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
-import {
-  parseCodexCatalogPresentations,
-  projectIdentityFromCwd,
-  type SessionContextObservation,
-} from '../skills/context-observations.js';
+import { projectIdentityFromCwd } from '../skills/context-observations.js';
+import { CODEX_CONTEXT_EVIDENCE_VERSION } from '../skills/codex-evidence-version.js';
+import { codexRecord as asRecord } from '../skills/codex-catalog.js';
+import { CodexContextParser, type CodexContextParseState } from './codex-context.js';
 import {
   extractCodexCommandFromInputJson,
   extractCodexSkillNamesFromCommand,
@@ -76,33 +74,12 @@ function parseToolInput(payload: CodexLine['payload']): unknown {
   return null;
 }
 
-function extractTextBlock(block: { type: string; text?: string }): string | null {
-  if ((block.type === 'text' || block.type === 'input_text' || block.type === 'output_text')
-    && typeof block.text === 'string'
-    && block.text.trim()) {
-    return block.text;
-  }
-
-  return null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
-function responseItemText(payload: Record<string, unknown>): string {
-  const content = payload['content'];
-  if (!Array.isArray(content)) return '';
-  return content
-    .map(item => {
-      const block = asRecord(item);
-      const text = block?.['text'];
-      return typeof text === 'string' ? text : '';
-    })
-    .filter(Boolean)
-    .join('');
+function extractTextBlock(value: unknown): string | null {
+  const block = asRecord(value);
+  const type = block?.['type'];
+  const text = block?.['text'];
+  return (type === 'text' || type === 'input_text' || type === 'output_text')
+    && typeof text === 'string' && text.trim() ? text : null;
 }
 
 /** Longest tool-output preview a receipt keeps, in characters. */
@@ -138,14 +115,10 @@ export interface CodexParseState {
   parentSessionId: string | null;
   relationshipType: string | null;
   harnessVersion: string | null;
-  initialModel: string | null;
-  initialContextWindowReported?: number;
-  latestModel: string | null;
   contextUsedTokens?: number;
   contextWindowReported?: number;
   malformedRecords: number;
-  sawInstructionWorldState: boolean;
-  sawCatalogPresentation: boolean;
+  contextEvidence: CodexContextParseState;
   /** Calls still waiting for their output, by call id, with their message ordinal. */
   openCalls?: Record<string, number>;
 }
@@ -153,6 +126,7 @@ export interface CodexParseState {
 export interface CodexParseOptions {
   /** Keep a bounded preview of each tool output. Defaults to the live tool-argument capture setting. */
   captureToolOutput?: boolean;
+  inheritedThroughOrdinal?: number;
 }
 
 export function parseCodexSessionMessages(
@@ -196,15 +170,11 @@ export function parseCodexSessionChunk(
   let parentSessionId: string | null = state?.parentSessionId ?? null;
   let relationshipType: string | null = state?.relationshipType ?? null;
   let harnessVersion: string | null = state?.harnessVersion ?? null;
-  let initialModel: string | null = state?.initialModel ?? null;
-  let initialContextWindowReported: number | undefined = state?.initialContextWindowReported;
-  let latestModel: string | null = state?.latestModel ?? null;
   let contextUsedTokens: number | undefined = state?.contextUsedTokens;
   let contextWindowReported: number | undefined = state?.contextWindowReported;
   let malformedRecords = state?.malformedRecords ?? 0;
-  let sawInstructionWorldState = state?.sawInstructionWorldState ?? false;
   let resumable = true;
-  const contextObservations: SessionContextObservation[] = [];
+  const contextEvidence = new CodexContextParser(state?.contextEvidence);
 
   const lines: Array<{ line: CodexLine; ordinal: number }> = [];
   let sourceOrdinal = state?.sourceOrdinal ?? 0;
@@ -212,9 +182,12 @@ export function parseCodexSessionChunk(
     const trimmed = raw.trim();
     if (!trimmed) continue;
     try {
-      lines.push({ line: JSON.parse(trimmed) as CodexLine, ordinal: sourceOrdinal });
+      const line = asRecord(JSON.parse(trimmed));
+      if (!line) throw new Error('invalid source record');
+      lines.push({ line: line as CodexLine, ordinal: sourceOrdinal });
     } catch {
       malformedRecords++;
+      lines.push({ line: { type: 'malformed_source_record' }, ordinal: sourceOrdinal });
     }
     sourceOrdinal++;
   }
@@ -238,7 +211,7 @@ export function parseCodexSessionChunk(
 
   for (const { line } of state ? [] : lines) {
     if (line.type === 'session_meta' && line.payload) {
-      cwd = (line.payload.cwd as string) ?? null;
+      cwd = typeof line.payload.cwd === 'string' ? line.payload.cwd : null;
       startedAt = line.payload.timestamp ?? line.timestamp ?? null;
       endedAt = startedAt;
       originator = line.payload.originator;
@@ -264,37 +237,19 @@ export function parseCodexSessionChunk(
       break;
     }
   }
-  for (const { line } of lines) {
-    if (
-      initialModel === null
-      && line.type === 'turn_context'
-      && typeof line.payload?.['model'] === 'string'
-    ) {
-      initialModel = line.payload['model'];
-    }
-    if (
-      initialContextWindowReported === undefined
-      && line.type === 'event_msg'
-      && line.payload?.type === 'token_count'
-      && typeof line.payload.info?.model_context_window === 'number'
-    ) {
-      initialContextWindowReported = line.payload.info.model_context_window;
-    }
-    if (initialModel !== null && initialContextWindowReported !== undefined) break;
-  }
-
   let latestCwd = state ? state.latestCwd : cwd;
-  const inspectContextPayload = (
+  const inspectConsultations = (
     payload: Record<string, unknown>,
     ordinal: number,
     timestamp: string | null,
-    source: string,
   ): void => {
     const payloadCwd = payload['cwd'];
     if (typeof payloadCwd === 'string' && payloadCwd.trim()) latestCwd = payloadCwd;
     const projectIdentity = projectIdentityFromCwd(latestCwd);
+    const type = payload['type'];
     const name = payload['name'];
-    if (typeof name === 'string' && ['exec_command', 'exec'].includes(name)) {
+    if (!payload['role'] && (type === 'function_call' || type === 'custom_tool_call' || type === undefined)
+      && typeof name === 'string' && ['exec_command', 'exec'].includes(name)) {
       const input = typeof payload['input'] === 'string'
         ? payload['input']
         : typeof payload['arguments'] === 'string'
@@ -304,10 +259,10 @@ export function parseCodexSessionChunk(
       if (command) {
         const commandFingerprint = fingerprintCodexCommand(command);
         for (const skillName of extractCodexSkillNamesFromCommand(command)) {
-          contextObservations.push({
+          contextEvidence.emit({
             ordinal,
             kind: 'consultation',
-            source,
+            source: 'codex_response_item',
             timestamp,
             skillName,
             commandFingerprint,
@@ -317,38 +272,11 @@ export function parseCodexSessionChunk(
       }
     }
 
-    const text = responseItemText(payload);
-    for (const presentation of parseCodexCatalogPresentations(text)) {
-      if ((latestModel ?? initialModel) === null
-        || (contextWindowReported ?? initialContextWindowReported) === undefined) {
-        resumable = false;
-      }
-      contextObservations.push({
-        ordinal,
-        kind: 'catalog_presentation',
-        source,
-        timestamp,
-        projectIdentity: projectIdentity ?? undefined,
-        metadata: {
-          fingerprint: presentation.fingerprint,
-          measurement: presentation.measurement,
-          truncation: presentation.truncation,
-          runtime: {
-            harnessVersion,
-            model: latestModel ?? initialModel,
-            modelVersion: null,
-            contextWindowIdentity: (contextWindowReported ?? initialContextWindowReported) === undefined
-              ? null
-              : `tokens:${contextWindowReported ?? initialContextWindowReported}`,
-            representation: presentation.representation,
-          },
-        },
-        catalogEntries: presentation.entries,
-      });
-    }
   };
 
-  for (const { line, ordinal } of lines) {
+  for (const [index, { line, ordinal }] of lines.entries()) {
+    contextEvidence.inspect(line, ordinal * 1000, latestCwd,
+      ordinal <= (options?.inheritedThroughOrdinal ?? -1), lines[index + 1]?.line);
     const timestamp = line.timestamp ?? null;
     if (timestamp) {
       // WHY: A fork's inherited messages can predate its own creation; they cannot establish the
@@ -372,69 +300,8 @@ export function parseCodexSessionChunk(
     if (line.type === 'turn_context' && typeof line.payload?.cwd === 'string') {
       latestCwd = line.payload.cwd;
     }
-    if (line.type === 'turn_context' && typeof line.payload?.['model'] === 'string') {
-      latestModel = line.payload['model'];
-    }
-
-    if (line.type === 'world_state' && line.payload) {
-      const state = asRecord(line.payload['state']);
-      if (state && Object.prototype.hasOwnProperty.call(state, 'agents_md')) {
-        sawInstructionWorldState = true;
-        const rawAgents = state['agents_md'];
-        const agents = Array.isArray(rawAgents) ? rawAgents : [rawAgents];
-        for (const rawAgent of agents) {
-          const agent = asRecord(rawAgent);
-          const directory = agent?.['directory'];
-          if (typeof directory !== 'string' || !directory.trim()) continue;
-          contextObservations.push({
-            ordinal: ordinal * 1000,
-            kind: 'instruction_load',
-            source: 'codex_world_state',
-            timestamp,
-            projectIdentity: projectIdentityFromCwd(latestCwd) ?? undefined,
-            metadata: {
-              file_path: path.join(directory, 'AGENTS.md'),
-              memory_type: 'AGENTS.md',
-            },
-          });
-        }
-      }
-      continue;
-    }
-
-    if (line.type === 'compacted') {
-      contextObservations.push({
-        ordinal: ordinal * 1000,
-        kind: 'compaction',
-        source: 'codex_compacted',
-        timestamp,
-        projectIdentity: projectIdentityFromCwd(latestCwd) ?? undefined,
-      });
-      const replacementHistory = line.payload?.['replacement_history'];
-      if (Array.isArray(replacementHistory)) {
-        replacementHistory.forEach((item, replacementIndex) => {
-          const record = asRecord(item);
-          const nestedPayload = asRecord(record?.['payload']) ?? record;
-          if (nestedPayload) {
-            inspectContextPayload(
-              nestedPayload,
-              ordinal * 1000 + replacementIndex + 1,
-              typeof record?.['timestamp'] === 'string' ? record['timestamp'] : timestamp,
-              'codex_replacement_history',
-            );
-          }
-        });
-      }
-      continue;
-    }
-
     if (line.type !== 'response_item' || !line.payload) continue;
-    inspectContextPayload(
-      line.payload as Record<string, unknown>,
-      ordinal * 1000,
-      timestamp,
-      'codex_response_item',
-    );
+    inspectConsultations(line.payload as Record<string, unknown>, ordinal * 1000, timestamp);
 
     const role = line.payload.role;
     const contentBlocks = line.payload.content;
@@ -535,8 +402,12 @@ export function parseCodexSessionChunk(
   }
 
   const project = cwd ? projectNameFromCwd(cwd) : (filePath ? projectFromCodexPath(filePath) : null);
-  const sawCatalogPresentation = (state?.sawCatalogPresentation ?? false)
-    || contextObservations.some(observation => observation.kind === 'catalog_presentation');
+  contextEvidence.finish();
+  const evidence = contextEvidence.state;
+  const catalogSources = [...evidence.catalogSources.values()].map(({ state }) => state);
+  const catalogReason = catalogSources.find(source => source.status === 'unknown')?.reason ?? 'presentation_signal_absent';
+  const coverageReason = malformedRecords > 0 ? 'malformed_source_record'
+    : evidence.diagnostics.has('context_history_limit') ? 'context_history_limit' : null;
 
   const parsed: ParsedSession = {
     messages,
@@ -561,24 +432,20 @@ export function parseCodexSessionChunk(
     },
     skillContext: {
       projectIdentity: projectIdentityFromCwd(latestCwd),
-      observations: contextObservations.sort((left, right) => left.ordinal - right.ordinal),
+      observations: contextEvidence.observations.sort((left, right) => left.ordinal - right.ordinal),
       capabilities: {
-        orderedConsultations: malformedRecords === 0
+        orderedConsultations: coverageReason
+          ? { observable: false, reason: coverageReason } : { observable: true },
+        compactionVisibility: coverageReason
+          ? { observable: false, reason: coverageReason } : { observable: true },
+        catalogPresentation: evidence.hasPresentation
+          ? { observable: true } : { observable: false, reason: catalogReason },
+        instructionLoads: evidence.hasInstructionObservation
           ? { observable: true }
-          : { observable: false, reason: 'malformed_source_record' },
-        compactionVisibility: malformedRecords === 0
-          ? { observable: true }
-          : { observable: false, reason: 'malformed_source_record' },
-        catalogPresentation: sawCatalogPresentation
-          ? { observable: true }
-          : { observable: false, reason: 'presentation_signal_absent' },
-        instructionLoads: sawInstructionWorldState
-          ? { observable: true }
-          : {
-              observable: false,
-              reason: 'instruction_load_signal_absent',
-            },
-        diagnostics: malformedRecords > 0 ? ['malformed_source_record'] : [],
+          : evidence.instructionCoverage ?? { observable: false, reason: 'instruction_load_signal_absent' },
+        diagnostics: [...new Set([...(coverageReason ? [coverageReason] : []), ...evidence.diagnostics])],
+        codexEvidenceVersion: CODEX_CONTEXT_EVIDENCE_VERSION,
+        codexCatalogSources: catalogSources,
       },
     },
   };
@@ -598,17 +465,13 @@ export function parseCodexSessionChunk(
       parentSessionId,
       relationshipType,
       harnessVersion,
-      initialModel,
-      initialContextWindowReported,
-      latestModel,
       contextUsedTokens,
       contextWindowReported,
       malformedRecords,
-      sawInstructionWorldState,
-      sawCatalogPresentation,
+      contextEvidence: evidence,
       openCalls: Object.fromEntries([...openCalls].slice(-OPEN_CALL_LIMIT)),
     },
-    resumable,
+    resumable: resumable && contextEvidence.resumable,
   };
 }
 
